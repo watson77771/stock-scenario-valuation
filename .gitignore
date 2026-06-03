@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# 估值輸出 (個人資料,不公開)
+*.xlsx
+!examples/*.xlsx
+reports/
+output/
+backup/
+
+# API key / 機密
+.env
+*.key
+secrets.*
+
+# 個人設定 (使用者自己的投資組合不該進 repo)
+config.yaml
+!config.example.yaml
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

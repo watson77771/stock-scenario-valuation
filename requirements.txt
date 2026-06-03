@@ -1,0 +1,5 @@
+yfinance>=0.2.40
+openpyxl>=3.1.2
+
+# 階段三 (LLM 假設) 才需要,目前選配:
+# anthropic>=0.40.0

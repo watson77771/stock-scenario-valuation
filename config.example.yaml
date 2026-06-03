@@ -1,0 +1,31 @@
+# config.example.yaml
+# ====================
+# 這是「批次估值清單」的範例設定。
+# 複製成 config.yaml 後填入你想追蹤的公司即可。
+# (config.yaml 已被 .gitignore 排除,你的個人清單不會進 repo)
+#
+# 注意: 階段一的 CLI 主要用 `python -m valuate <TICKER>` 直接查詢,
+#       這個 config 是為了「固定追蹤一籃子公司」的批次用途預留。
+#       完整批次功能在階段二實作。
+
+version: "1.0"
+
+# 你想固定追蹤的公司清單 (範例用人人皆知的公司)
+watchlist:
+  - ticker: AAPL
+    note: "消費電子龍頭"
+  - ticker: MSFT
+    note: "軟體 + 雲端"
+  - ticker: NVDA
+    note: "AI 晶片"
+  - ticker: GOOGL
+    note: "搜尋 + 雲端 + AI"
+
+# 自訂產業倍數覆寫 (選用)
+# 若你不同意內建 sector_map 的判斷,可在此覆寫特定產業
+# overrides:
+#   Semiconductors: { bear: 18, base: 30, bull: 45 }
+
+settings:
+  output_dir: "./reports"
+  excel: true
