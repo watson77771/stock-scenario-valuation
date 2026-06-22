@@ -9,6 +9,22 @@
 
 ---
 
+## ⚠️ 目前版本說明（請先讀這段）
+
+**現階段（v1 / 階段一）的估值假設來自「產業分類固定倍數表」，不是針對個別公司的智慧判斷。**
+
+這代表：
+
+- 同一產業的所有公司，套用**同一組** Bear / Base / Bull 本益比（例如所有半導體股都用 18 / 28 / 40x）
+- 工具**不會**讀取個別公司的新聞、催化劑、護城河等特殊因素
+- 因此對「產業中的特殊公司」可能失準。例如 Apple 的品牌與服務溢價讓市場給它高於同業的倍數，但產業表會把它當成普通消費電子公司，估值偏保守
+
+**這是設計上的取捨，不是 bug** —— 換來的是免費、瞬間、透明、可手動調整。你隨時可以編輯 [`valuate/sector_map.py`](valuate/sector_map.py) 來覆寫你不同意的倍數。
+
+📍 **未來規劃**：作者將於近期接入 LLM（Claude API），讓使用者可根據個別公司的即時狀況動態生成更精準的假設。詳見下方[路線圖](#路線圖)。
+
+---
+
 ## 這是什麼
 
 大多數估值工具只給你一個目標價。但真實投資決策需要的是**情境思考**：最壞會怎樣（Bear）、合理預期是什麼（Base）、最好能到哪（Bull）。
@@ -16,7 +32,7 @@
 這個工具讓你輸入一個股票代號，就自動：
 
 1. 從 yfinance 抓取現價、Forward EPS、產業分類
-2. 根據產業套用合理的三情境本益比範圍
+2. 根據產業套用固定的三情境本益比範圍（來自內建對照表，非個別公司客製）
 3. 計算 Bear / Base / Bull 目標價與隱含報酬率
 4. 與分析師共識目標價對照
 5. 輸出終端表格或 Excel 報告
@@ -29,7 +45,7 @@ $ python -m valuate AVGO
 ================================================================
   產業       : Technology / Semiconductors
   現價       : $433.62
-  EPS (forward ): $13.50
+  EPS (forward): $13.50
   假設來源   : sector_table [industry: Semiconductors]
 
   情境         P/E         目標價        報酬率
@@ -47,7 +63,7 @@ $ python -m valuate AVGO
 ## 安裝
 
 ```bash
-git clone https://github.com/<your-username>/stock-scenario-valuation.git
+git clone https://github.com/watson77771/stock-scenario-valuation.git
 cd stock-scenario-valuation
 pip install -r requirements.txt
 ```
@@ -94,6 +110,7 @@ python -m valuate --list-sectors
 ```
 
 不同情境用不同 P/E：
+
 - **Bear**：市場悲觀 / 風險升溫時的低位倍數
 - **Base**：產業中性估值
 - **Bull**：市場樂觀 / 題材發酵時的高位倍數
@@ -106,12 +123,12 @@ python -m valuate --list-sectors
 |---|---|---|---|
 | 半導體 | 18x | 28x | 40x |
 | 基礎架構軟體 | 22x | 34x | 48x |
-| 能源（煉油）| 8x | 12x | 16x |
-| 金融（銀行）| 8x | 11x | 14x |
+| 能源（煉油） | 8x | 12x | 16x |
+| 金融（銀行） | 8x | 11x | 14x |
 
-yfinance 回傳公司的 sector / industry，工具自動歸類套用。找不到對應產業時，使用通用預設 12/18/26x。
+yfinance 回傳公司的 sector / industry，工具自動歸類套用。找不到對應產業時，使用通用預設 12 / 18 / 26x。
 
-**這些倍數是經驗法則，你可以也應該根據自己的判斷調整** — 直接編輯 `valuate/sector_map.py`。
+**這些倍數是經驗法則，你可以也應該根據自己的判斷調整** —— 直接編輯 `valuate/sector_map.py`。
 
 ### 估值方法二：DCF 現金流折現法（階段二）
 
@@ -162,7 +179,7 @@ P/E 法靠市場情緒；DCF 法靠公司本身能生出多少現金。五步驟
 
 ### 關於階段三（LLM 假設生成）
 
-產業分類表是「靜態」的 — 它不知道某家公司當下有什麼特殊催化劑。階段三會接入 Claude API，根據公司的即時狀況動態生成更精準的三情境假設。
+產業分類表是「靜態」的 —— 它不知道某家公司當下有什麼特殊催化劑。階段三會接入 Claude API，根據公司的即時狀況動態生成更精準的三情境假設。
 
 **這是選配功能，採 BYOK（Bring Your Own Key）模式**：
 
