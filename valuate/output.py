@@ -356,3 +356,59 @@ def write_dcf_xlsx(r, output_dir: str = ".") -> str:
     out_path = Path(output_dir) / f"{r.ticker}_DCF_{ts}.xlsx"
     wb.save(out_path)
     return str(out_path)
+
+
+# ============================================================
+# P/E vs DCF 交叉比較 (--method both)
+# ============================================================
+
+def print_comparison(pe, dcf) -> None:
+    """並排比較 P/E 法與 DCF 法 (任一可為 None)"""
+    ref = pe or dcf
+    if ref is None:
+        print("  ❌ 兩種方法都無法估值")
+        return
+
+    price = ref.current_price
+    print()
+    print("=" * 68)
+    print(f"  {ref.ticker}  {ref.name}   [P/E vs DCF 交叉比較]")
+    print("=" * 68)
+    print(f"  產業       : {ref.sector or '?'} / {ref.industry or '?'}")
+    print(f"  現價       : ${price:,.2f}")
+    print()
+    print(f"  {'方法':<8}{'Bear':>14}{'Base':>14}{'Bull':>14}{'Base報酬':>12}")
+    print("  " + "-" * 62)
+
+    if pe is not None:
+        print(f"  {'P/E 法':<7}"
+              f"${pe.bear_target:>11,.2f} ${pe.base_target:>11,.2f} "
+              f"${pe.bull_target:>11,.2f} {pe.base_return:>+10.1%}")
+    else:
+        print(f"  {'P/E 法':<7}{'(資料不足,略過)':>30}")
+
+    if dcf is not None:
+        print(f"  {'DCF 法':<7}"
+              f"${dcf.bear.target:>11,.2f} ${dcf.base.target:>11,.2f} "
+              f"${dcf.bull.target:>11,.2f} {dcf.base.ret:>+10.1%}")
+    else:
+        print(f"  {'DCF 法':<7}{'(資料不足,略過)':>30}")
+
+    print()
+    if ref.analyst_target_mean:
+        print(f"  分析師均價 : ${ref.analyst_target_mean:,.2f} (參考)")
+
+    # 解讀: 兩法 Base 的差異代表什麼
+    if pe is not None and dcf is not None and pe.base_target and dcf.base.target:
+        diff = dcf.base.target / pe.base_target - 1
+        print()
+        print(f"  解讀: DCF Base (${dcf.base.target:,.0f}) vs P/E Base "
+              f"(${pe.base_target:,.0f}),差異 {diff:+.0%}")
+        if abs(diff) <= 0.30:
+            print("        → 兩法接近,估值有現金流基本面支撐,可信度較高")
+        elif diff < 0:
+            print("        → DCF 較保守: 市場用產業倍數給的溢價,基本面現金流暫時撐不起,")
+            print("          差距多來自市場對未來成長的想像 (常見於高成長/高品質股)")
+        else:
+            print("        → DCF 較樂觀: 現金流基本面優於市場給的產業倍數,可能被低估")
+    print()

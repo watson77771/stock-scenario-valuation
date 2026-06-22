@@ -9,6 +9,7 @@ cli.py
   python -m valuate NVDA TSLA AAPL        # 多家公司
   python -m valuate AAPL --method dcf     # 用 DCF 現金流折現法 (階段二)
   python -m valuate AAPL --method dcf --excel
+  python -m valuate AAPL --method both    # P/E 與 DCF 並排交叉比較
   python -m valuate AVGO --use-llm        # 用 Claude API (階段三,需 API key)
   python -m valuate --list-sectors        # 列出支援的產業
 """
@@ -28,7 +29,8 @@ from .engine import ValuationEngine
 from .dcf import DCFEngine
 from .assumptions.sector_based import SectorBasedAssumptions
 from .assumptions.llm_based import LLMBasedAssumptions
-from .output import print_result, write_xlsx, print_dcf_result, write_dcf_xlsx
+from .output import (print_result, write_xlsx, print_dcf_result,
+                     write_dcf_xlsx, print_comparison)
 from . import sector_map
 
 
@@ -42,14 +44,38 @@ def build_engine(use_llm: bool) -> ValuationEngine:
 
 
 def run_one(ticker: str, engine, to_excel: bool, output_dir: str,
-            method: str = "pe"):
-    """估值單一公司 (method = 'pe' 或 'dcf')"""
+            method: str = "pe", dcf_engine=None):
+    """估值單一公司 (method = 'pe' / 'dcf' / 'both')"""
     print(f"\n→ 抓取 {ticker} ...")
-    company = fetch_company(ticker, fetch_dcf=(method == "dcf"))
+    company = fetch_company(ticker, fetch_dcf=(method in ("dcf", "both")))
 
     if company.fetch_errors:
         for e in company.fetch_errors:
             print(f"  ⚠️  {e}")
+
+    if method == "both":
+        pe_res = dcf_res = None
+        if company.is_valid:
+            try:
+                pe_res = engine.value(company)
+            except ValueError:
+                pass
+        if company.has_dcf_data:
+            try:
+                dcf_res = dcf_engine.value(company)
+            except ValueError:
+                pass
+        if pe_res is None and dcf_res is None:
+            print(f"  ❌ {ticker} 兩種方法都無法估值")
+            return
+        print_comparison(pe_res, dcf_res)
+        if to_excel:
+            if pe_res:
+                print(f"  📄 已輸出: {write_xlsx(pe_res, output_dir)}")
+            if dcf_res:
+                print(f"  📄 已輸出: {write_dcf_xlsx(dcf_res, output_dir)}")
+            print()
+        return
 
     if method == "dcf":
         if not company.has_dcf_data:
@@ -93,8 +119,9 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument("tickers", nargs="*", help="股票代號 (可多個)")
-    parser.add_argument("--method", choices=["pe", "dcf"], default="pe",
-                        help="估值方法: pe=本益比法(預設) / dcf=現金流折現法(階段二)")
+    parser.add_argument("--method", choices=["pe", "dcf", "both"], default="pe",
+                        help="估值方法: pe=本益比法(預設) / dcf=現金流折現法(階段二) / "
+                             "both=兩法並排交叉比較")
     parser.add_argument("--excel", action="store_true", help="產出 xlsx 報告")
     parser.add_argument("--use-llm", action="store_true",
                         help="用 Claude API 生成假設 (階段三,需 ANTHROPIC_API_KEY;僅 P/E 法)")
@@ -118,15 +145,21 @@ def main():
         parser.print_help()
         return
 
-    if args.method == "dcf":
+    if args.method in ("dcf", "both"):
         rf, rf_note = fetch_risk_free_rate()
         print(f"  ℹ️  {rf_note}")
+
+    dcf_engine = None
+    if args.method == "dcf":
         engine = DCFEngine(rf)
+    elif args.method == "both":
+        engine = build_engine(args.use_llm)
+        dcf_engine = DCFEngine(rf)
     else:
         engine = build_engine(args.use_llm)
 
     for ticker in args.tickers:
-        run_one(ticker, engine, args.excel, args.output_dir, args.method)
+        run_one(ticker, engine, args.excel, args.output_dir, args.method, dcf_engine)
 
 
 if __name__ == "__main__":

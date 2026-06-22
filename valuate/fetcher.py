@@ -47,6 +47,7 @@ class CompanyData:
     recommendation: Optional[str] = None
 
     # --- 階段二 DCF 所需 (僅在 fetch_dcf=True 時抓取) ---
+    financial_currency: Optional[str] = None       # 財報幣別 (ADR 可能非 USD)
     beta: Optional[float] = None
     total_debt: Optional[float] = None
     total_cash: Optional[float] = None
@@ -177,6 +178,22 @@ def _fcf_history_from_cashflow(cf) -> list[float]:
     return []
 
 
+def _fx_to_usd(currency: str) -> Optional[float]:
+    """取得 1 單位外幣 = 多少 USD。USD 回 1.0;抓不到回 None。"""
+    if not currency or currency == "USD":
+        return 1.0
+    try:
+        fx = yf.Ticker(f"{currency}USD=X")
+        rate = fx.fast_info.get("last_price")
+        if rate is None:
+            hist = fx.history(period="5d")
+            if not hist.empty:
+                rate = float(hist["Close"].iloc[-1])
+        return float(rate) if rate else None
+    except Exception:
+        return None
+
+
 def fetch_risk_free_rate() -> tuple[float, str]:
     """
     抓 10 年期美債殖利率 (^TNX) 當無風險利率 Rf。
@@ -305,5 +322,31 @@ def fetch_company(ticker: str, fetch_dcf: bool = False) -> CompanyData:
                 fin, "Tax Provision", "Income Tax Expense")
         except Exception as e:
             data.fetch_errors.append(f"損益表抓取失敗: {e}")
+
+        # 幣別統一: 財報(可能 TWD/KRW 等) vs 股價(USD)。ADR 常見不一致,
+        # 不換算會讓 DCF 結果差數十倍。把所有「絕對金額」換成 USD;
+        # 比率類 (稅率) 因分子分母同幣別會自動抵銷,不需換算。
+        fin_cur = info.get("financialCurrency") if info else None
+        data.financial_currency = fin_cur
+        if fin_cur and fin_cur != "USD":
+            rate = _fx_to_usd(fin_cur)
+            if rate is None:
+                data.fetch_errors.append(
+                    f"財報幣別為 {fin_cur} 但匯率抓取失敗,DCF 無法統一為 USD,請改用 P/E 法")
+                data.free_cashflow = None          # 阻擋 DCF,避免輸出幣別混亂的垃圾
+            else:
+                if data.free_cashflow is not None:
+                    data.free_cashflow *= rate
+                data.fcf_history = [x * rate for x in data.fcf_history]
+                if data.total_debt is not None:
+                    data.total_debt *= rate
+                if data.total_cash is not None:
+                    data.total_cash *= rate
+                if data.interest_expense is not None:
+                    data.interest_expense *= rate
+                data.fcf_source += f" (由 {fin_cur} 換算 USD)"
+                data.fetch_errors.append(
+                    f"財報幣別 {fin_cur} 已換算為 USD (匯率 {rate:.4f});"
+                    f"ADR 估值含匯率風險,僅供參考")
 
     return data
