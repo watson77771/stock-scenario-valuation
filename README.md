@@ -1,43 +1,50 @@
 # stock-scenario-valuation
 
-> 輸入任意美股代號，自動抓取財報資料，套用產業分類倍數，產出 **Bear / Base / Bull 三情境**目標價與 Excel 報告。
+> 🌐 **Language / 語言**: **English (this page)** ・ [中文](README.zh.md)
+
+> Enter any US ticker, auto-fetch financials, apply sector multiples, and produce **Bear / Base / Bull** three-scenario target prices and an Excel report.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**作者**：Watson Tsai
+**Author**: Watson Tsai
 
 ---
 
-## ⚠️ 目前版本說明（請先讀這段）
+## ⚠️ Current version (read this first)
 
-本工具目前提供**兩種互補的估值方法**，可交叉驗證：
+The tool ships **three complementary valuation methods** that cross-check each other:
 
-| 方法 | 指令 | 看的是 | 階段 |
-|---|---|---|---|
-| **P/E 本益比法** | （預設） | 市場願意給幾倍（靠別人的情緒） | 階段一 ✅ |
-| **DCF 現金流折現法** | `--method dcf` | 公司一輩子生多少現金折回今天（靠公司本身） | 階段二 ✅ |
-| **兩法交叉比較** | `--method both` | 並排呈現兩法差異，差距即「市場溢價 vs 基本面」訊號 | 階段二 ✅ |
+| Method | Command | What it sees | Best for | Stage |
+|---|---|---|---|---|
+| **P/E multiple** | (default) | what multiple the market will pay (others' sentiment) | all | Stage 1 ✅ |
+| **DCF (discounted cash flow)** | `--method dcf` | how much cash the company itself generates, discounted to today | cash cows / stable names | Stage 2 ✅ |
+| **PEG (growth-adjusted)** | `--method peg` | whether the premium paid for "growth" is reasonable | profitable, positive-growth only | Stage 2+ ✅ |
+| **Three-way cross-check** | `--method both` | all three side by side; the spread is the signal | — | Stage 2+ ✅ |
 
-**關於 P/E 法的限制**：它的倍數來自「產業分類固定倍數表」，同一產業所有公司套用**同一組** Bear / Base / Bull 本益比（例如所有半導體股都用 18 / 28 / 40x），不讀取個別公司的新聞、催化劑、護城河。因此對「產業中的特殊公司」可能失準（例如 Apple 的品牌溢價會被當成普通消費電子股而低估）。**這是設計上的取捨，不是 bug** —— 換來的是免費、瞬間、透明、可手動調整（編輯 [`valuate/sector_map.py`](valuate/sector_map.py)）。
+**Each method has its own zone — that division of labor is deliberate.** DCF is a conservative fundamentals floor (cash cows ≈ price, growth names < price); PEG captures the growth premium DCF can't see (mainly for growth names); P/E catches both sides. For a given stock, the spread between the three is itself a signal.
 
-**DCF 法則從公司本身的自由現金流出發**，補上 P/E 法看不到的基本面視角。兩種方法結果差異大時，往往是市場定價與基本面出現分歧的訊號。⚠️ DCF 對「基準 FCF」極度敏感，且 yfinance 免費財報常含一次性項目，工具會自動警示，但仍建議手動檢視財報後再下判斷。
+**On the P/E method's limit**: its multiples come from a fixed sector-classification table. Every company in a sector uses the **same** Bear / Base / Bull P/E (e.g. all semiconductors use 18 / 28 / 40x), ignoring company-specific news, catalysts and moat. So it can misprice "special companies within a sector" (e.g. Apple's brand premium gets treated like a generic consumer-electronics name and undervalued). **This is a design trade-off, not a bug** — in exchange you get free, instant, transparent, hand-tunable output (edit [`valuate/sector_map.py`](valuate/sector_map.py)).
 
-📍 **未來規劃（階段三）**：接入 LLM（Claude API），讓使用者可根據個別公司的即時狀況動態生成更精準的假設。詳見下方[路線圖](#路線圖)。
+**DCF starts from the company's own free cash flow**, adding the fundamentals view the P/E method can't see. When the two methods diverge a lot, that's often a sign the market price and fundamentals disagree. ⚠️ DCF is extremely sensitive to "base FCF", and yfinance's free financials often contain one-off items; the tool warns automatically, but manual review of the statements is still advised.
+
+**The PEG method** uses the growth rate to judge whether a P/E is reasonable, covering DCF's blind spot of systematically undervaluing growth names. It needs reliable multi-year EPS: history from **SEC EDGAR** (official, free), the future from **FMP analyst estimates** (bring your own free API key via env var `FMP_API_KEY`; without a key it computes trailing PEG only). ⚠️ PEG is only meaningful for profitable, positive-growth names; for zero/negative-growth, cyclical, financial and loss-making stocks the tool automatically gates and flags it.
+
+📍 **Roadmap (stage 3)**: integrate an LLM (Claude API) so users can generate sharper, company-specific assumptions from each company's live situation. See the [roadmap](#roadmap) below.
 
 ---
 
-## 這是什麼
+## What this is
 
-大多數估值工具只給你一個目標價。但真實投資決策需要的是**情境思考**：最壞會怎樣（Bear）、合理預期是什麼（Base）、最好能到哪（Bull）。
+Most valuation tools give you a single target price. But real investment decisions need **scenario thinking**: how bad is the worst case (Bear), what's a fair expectation (Base), how high could it go (Bull).
 
-這個工具讓你輸入一個股票代號，就自動：
+Enter one ticker and the tool automatically:
 
-1. 從 yfinance 抓取現價、Forward EPS、產業分類
-2. 根據產業套用固定的三情境本益比範圍（來自內建對照表，非個別公司客製）
-3. 計算 Bear / Base / Bull 目標價與隱含報酬率
-4. 與分析師共識目標價對照
-5. 輸出終端表格或 Excel 報告
+1. Fetches price, forward EPS and sector from yfinance
+2. Applies a fixed three-scenario P/E range by sector (from a built-in table, not company-specific)
+3. Computes Bear / Base / Bull targets and implied returns
+4. Compares against the analyst consensus target
+5. Prints a terminal table or writes an Excel report
 
 ```
 $ python -m valuate AVGO
@@ -45,24 +52,24 @@ $ python -m valuate AVGO
 ================================================================
   AVGO  Broadcom Inc
 ================================================================
-  產業       : Technology / Semiconductors
-  現價       : $433.62
+  Sector     : Technology / Semiconductors
+  Price      : $433.62
   EPS (forward): $13.50
-  假設來源   : sector_table [industry: Semiconductors]
+  Source     : sector_table [industry: Semiconductors]
 
-  情境         P/E         目標價        報酬率
-  ------------------------------------------
-  Bear       18.0x     $243.00      -44.0%
-  Base       28.0x     $378.00      -12.8%
-  Bull       40.0x     $540.00      +24.5%
+  Scenario       P/E        Target      Return
+  --------------------------------------------
+  Bear         18.0x     $243.00      -44.0%
+  Base         28.0x     $378.00      -12.8%
+  Bull         40.0x     $540.00      +24.5%
 
-  分析師均價 : $458.00 (參考)
-  理由       : 依產業分類對照表 (industry: Semiconductors)。AI 題材推升 / 週期性強 / 龍頭享溢價
+  Analyst avg: $458.00 (ref)
+  Rationale  : Per sector-classification table (industry: Semiconductors). AI tailwind / cyclical / leaders command a premium
 ```
 
 ---
 
-## 安裝
+## Install
 
 ```bash
 git clone https://github.com/watson77771/stock-scenario-valuation.git
@@ -70,155 +77,213 @@ cd stock-scenario-valuation
 pip install -r requirements.txt
 ```
 
-需求：Python 3.10+
+Requires Python 3.10+
 
 ---
 
-## 使用方式
+## Usage
 
 ```bash
-# 估值單一公司 (終端輸出,預設 P/E 法)
+# Value a single company (terminal output, default P/E method)
 python -m valuate AVGO
 
-# 用 DCF 現金流折現法估值 (階段二)
+# DCF (discounted cash flow) method (stage 2)
 python -m valuate AAPL --method dcf
 
-# 兩種方法並排交叉比較 (一眼看出市場溢價 vs 基本面)
+# PEG growth-adjusted method (EDGAR history + FMP estimates)
+python -m valuate AAPL --method peg
+
+# All three methods side by side
 python -m valuate AAPL --method both
 
-# 同時產出 Excel 報告
+# Also write an Excel report
 python -m valuate AVGO --excel
 python -m valuate AAPL --method dcf --excel
 
-# 一次估值多家公司
+# Value several companies at once
 python -m valuate NVDA TSLA AAPL --excel
 
-# 指定 Excel 輸出目錄
+# Choose the Excel output directory
 python -m valuate AVGO --excel --output-dir ./reports
 
-# 列出所有支援的產業分類
+# List all supported sector classifications
 python -m valuate --list-sectors
 ```
 
-> **兩種方法互為交叉驗證**：P/E 法看「市場願意給幾倍」(靠別人的情緒)，
-> DCF 法看「公司一輩子生多少現金折回今天」(靠公司本身)。
-> 兩者差異大時，往往是市場定價與基本面出現分歧的訊號。
+> **The three methods cross-validate each other**: P/E sees "what multiple the market will pay",
+> DCF sees "how much cash the company itself generates", PEG sees "whether the premium paid for
+> growth is reasonable". A large divergence is itself the signal.
 
 ---
 
-## 運作原理
+## How it works
 
-### 估值方法：P/E 法
+### Method 1: P/E
 
 ```
-目標價 = Forward EPS × 本益比 (P/E)
+Target = Forward EPS × P/E
 ```
 
-不同情境用不同 P/E：
+Each scenario uses a different P/E:
 
-- **Bear**：市場悲觀 / 風險升溫時的低位倍數
-- **Base**：產業中性估值
-- **Bull**：市場樂觀 / 題材發酵時的高位倍數
+- **Bear**: a low multiple when the market is pessimistic / risk is rising
+- **Base**: a neutral sector valuation
+- **Bull**: a high multiple when the market is optimistic / a theme is in play
 
-### 倍數從哪來？產業分類表
+### Where do the multiples come from? The sector table
 
-工具內建一張[產業 → 三情境 P/E 對照表](valuate/sector_map.py)，例如：
+The tool ships a [sector -> three-scenario P/E table](valuate/sector_map.py), e.g.:
 
-| 產業 | Bear | Base | Bull |
+| Sector | Bear | Base | Bull |
 |---|---|---|---|
-| 半導體 | 18x | 28x | 40x |
-| 基礎架構軟體 | 22x | 34x | 48x |
-| 能源（煉油） | 8x | 12x | 16x |
-| 金融（銀行） | 8x | 11x | 14x |
+| Semiconductors | 18x | 28x | 40x |
+| Infrastructure software | 22x | 34x | 48x |
+| Energy (refining) | 8x | 12x | 16x |
+| Financials (banks) | 8x | 11x | 14x |
 
-yfinance 回傳公司的 sector / industry，工具自動歸類套用。找不到對應產業時，使用通用預設 12 / 18 / 26x。
+yfinance returns the company's sector / industry and the tool classifies automatically. When no sector matches, it falls back to a generic default of 12 / 18 / 26x.
 
-**這些倍數是經驗法則，你可以也應該根據自己的判斷調整** —— 直接編輯 `valuate/sector_map.py`。
+**These multiples are rules of thumb; you can and should adjust them to your own judgment** — just edit `valuate/sector_map.py`.
 
-### 估值方法二：DCF 現金流折現法（階段二）
+### Method 2: DCF (discounted cash flow) (stage 2)
 
-P/E 法靠市場情緒；DCF 法靠公司本身能生出多少現金。五步驟：
+P/E rides market sentiment; DCF rides how much cash the company itself can produce. Five steps:
 
 ```
-1. 取基準自由現金流 FCF (優先用年度現金流量表最新值)
-2. 預測未來 5 年 FCF (依成長率 g)
-3. 折現率 WACC = (E/V)·Re + (D/V)·Rd·(1−稅率)，Re = Rf + β×ERP (CAPM)
-4. 終值 TV = FCF_5 × (1+g_終) / (WACC − g_終)   ← Gordon 永續成長
-5. 折現加總 = 企業價值 EV → 減淨負債 → ÷ 股數 = 每股目標價
+1. Take base free cash flow (FCF), median-normalized over the last N years to offset capex peaks / one-offs
+2. Project the next 10 years of FCF (two-stage fade: growth declines linearly from the starting rate to terminal growth)
+3. Discount rate WACC = (E/V)·Re + (D/V)·Rd·(1-tax), Re = Rf + beta×ERP (CAPM)
+4. Dual-track terminal: Gordon perpetuity × 50% + exit EV/FCF multiple × 50% (weighted average)
+5. Sum of PVs = enterprise value EV -> subtract net debt -> / shares = target per share
 ```
 
-**參數分三層，只有「營運層」隨情境變**（避免重複計入風險，這是讓三情境有意義的關鍵紀律）：
+> **Why not "5 years + pure Gordon"?** A 5-year explicit window truncates a growth company's
+> growth period too early into low perpetuity growth, and at WACC ~10% pure Gordon implies a
+> terminal multiple of only ~13x (the market pays quality businesses 25-40x). Together those make
+> DCF land far below market for almost every stock. With **10-year fade + dual-track terminal**
+> (perpetuity growth and exit multiple, half each), cash cows roughly match price while growth
+> names sit reasonably below it (the gap = the market's priced-in growth premium, which the P/E
+> method catches). Run `python backtest_valuation.py` to backtest the calibration yourself.
 
-| 層級 | 參數 | 隨 Bear/Base/Bull 變？ | 來源 |
+**Parameters are split into three layers; only the operating layer varies by scenario** (avoiding double-counting risk — the discipline that makes three scenarios meaningful):
+
+| Layer | Parameters | Varies with Bear/Base/Bull? | Source |
 |---|---|---|---|
-| 總經 / 房屋觀點 | 無風險利率 Rf、股權風險溢酬 ERP、終值成長 g_終 | ❌ 三情境固定 | Rf 抓 10Y 美債 `^TNX`；ERP=5.0% (Damodaran) |
-| 公司結構 | 稅率、資本結構、債務成本 Rd | ❌ 算一次固定 | yfinance 財報 + 後備值 |
-| **公司營運** | **FCF 成長率 g** | ✅ **只有它變** | 歷史 FCF CAGR 為 Base 錨，上下展開 |
+| Macro / house view | risk-free rate Rf, equity risk premium ERP, terminal growth g_inf | ❌ fixed across scenarios | Rf from 10Y UST `^TNX`; ERP=4.5% (calibrated to current implied ERP) |
+| Company structure | tax rate, capital structure, cost of debt Rd | ❌ computed once | yfinance financials + fallbacks |
+| **Company operations** | **starting growth g, exit EV/FCF multiple** | ✅ **varies by scenario** | historical robust FCF growth (median YoY) as Base anchor, spread up/down |
 
-所有房屋假設集中在 [`valuate/dcf_params.py`](valuate/dcf_params.py)，可依自身觀點調整。
+All house assumptions live in [`valuate/dcf_params.py`](valuate/dcf_params.py), adjustable to your own view.
 
-**內建護欄**（DCF 最容易自欺的地方，工具會自動警示）：
+**Built-in guardrails** (where DCF most easily fools itself — the tool warns automatically):
 
-- 終值成長 g_終 強制 < WACC（否則 Gordon 公式發散）
-- 終值佔企業價值 > 80% → 警告「此 DCF 實質在猜終值」
-- WACC 落在 6%–12% 外 → 警告參數可能失真
-- FCF 年度 vs TTM 分歧 / 歷史波動過大 → 警告可能含一次性項目，建議手動正規化
-- 報告附 **WACC × 終值成長敏感度表**，讓你看見估值對假設有多脆
+- Terminal growth g_inf forced < WACC (else the Gordon track diverges)
+- Terminal value > 80% of EV -> warns "this DCF is essentially guessing the terminal value"
+- WACC outside 6%-12% -> warns the inputs may be distorted
+- Normalized base FCF differs from the latest year by > 25% -> warns of a likely recent capex peak / one-off
+- Highly volatile FCF history -> warns of possible one-off items (already median-normalized as a buffer)
+- The report includes a **WACC × terminal-growth sensitivity table** so you can see how fragile the valuation is to assumptions
 
-> ⚠️ **資料品質提醒**：DCF 對「基準 FCF」極度敏感，而 yfinance 的免費財報常含一次性項目或缺漏。
-> 遇到工具警示時，請務必手動檢視該公司財報、排除一次性項目後再下判斷。
+> ⚠️ **Data-quality note**: DCF is extremely sensitive to "base FCF", and yfinance's free financials
+> often contain one-off items or gaps. When the tool warns, review the company's statements and
+> strip one-off items before drawing conclusions.
 
 ---
 
-## 路線圖
+### Method 3: PEG (growth-adjusted) (stage 2+)
 
-| 階段 | 狀態 | 內容 |
-|---|---|---|
-| **階段一** | ✅ 完成 | 產業分類表 P/E 估值 / CLI / Excel 輸出 |
-| **階段二** | 🚧 進行中 | **FCF 現金流折現法 ✅** / SOTP 業務分拆法 🔜 / 批次 portfolio 🔜 |
-| **階段三** | 🔮 研究中 | LLM 動態假設生成（Claude API）|
+DCF systematically undervalues growth names (it only discounts cash flow and can't see the premium the market pays for "growth"). PEG fills exactly that gap: it uses the growth rate to judge whether a P/E is reasonable.
 
-> 階段二的 **FCF / DCF 法已完成並可使用**（`--method dcf`）。SOTP（業務分拆）與批次
-> portfolio 估值為後續工作；DCF 已定義出完整的「假設面」（成長率 / WACC / 終值），
-> 階段三的 LLM 屆時可一次性對著最終假設面生成，不需重做。
+**It produces three things:**
 
-### 關於階段三（LLM 假設生成）
+```
+1. trailing PEG = (price / historical EPS) / historical EPS growth   <- EDGAR history, the track record
+2. forward  PEG = (price / estimated EPS) / future EPS growth        <- FMP estimates, what the market is betting
+3. growth-adjusted target = (growth% × target PEG) × EPS             <- Peter Lynch fair value
+```
 
-產業分類表是「靜態」的 —— 它不知道某家公司當下有什麼特殊催化劑。階段三會接入 Claude API，根據公司的即時狀況動態生成更精準的三情境假設。
+PEG read: **< 1 cheap relative to its growth / 1-2 fair / > 2 pricey**. The three scenarios only vary the "target PEG" (how many P/E points the market pays per unit of growth): Bear 1.0 / Base 1.5 / Bull 2.0.
 
-**這是選配功能，採 BYOK（Bring Your Own Key）模式**：
+**Growth window**: both history and the future use a **3-5 year** window, computed with the **median YoY** (not endpoint CAGR) to avoid a single year being distorted by buybacks or one-off items.
+
+**Data sources (layered, with graceful fallback):**
+
+| Use | Source | Key needed | Notes |
+|---|---|---|---|
+| Historical EPS (trailing) | SEC EDGAR `companyfacts` | ❌ free | official filed values, most accurate; US 10-K filers |
+| Future EPS (forward) | FMP `analyst-estimates` | ✅ BYOK | set `FMP_API_KEY`; without a key, trailing only |
 
 ```bash
-# 階段三啟用後 (目前為預留接口)
+# Set the FMP key (without it you only get trailing PEG)
+export FMP_API_KEY="your_free_FMP_key"
+# Also set an EDGAR User-Agent (SEC requires a contact email)
+export SEC_EDGAR_USER_AGENT="your-app your-email@example.com"
+
+python -m valuate AAPL --method peg
+python -m valuate AAPL --method peg --excel
+```
+
+**Built-in gating (where PEG most easily fools itself — the tool guards automatically):**
+
+- EPS ≤ 0 (loss-making) -> P/E is meaningless, no target produced
+- growth < 5% -> low growth, PEG denominator too small and distorted; flagged "N/A, use DCF"
+- growth > 50% -> very high growth is unsustainable; warned and the growth clamped to the cap
+- cyclical / financial / utilities / real estate -> EPS growth not representative; flagged "weak reference value"
+
+> ⚠️ PEG is a **growth-stock-specific** cross-check, not a universal valuation. Cash cows -> DCF,
+> growth names -> PEG, P/E catches both. That division of labor is the point of this design.
+
+---
+
+## Roadmap
+
+| Stage | Status | Content |
+|---|---|---|
+| **Stage 1** | ✅ done | sector-table P/E valuation / CLI / Excel output |
+| **Stage 2** | 🚧 in progress | **FCF DCF ✅** / **PEG growth-adjusted ✅** / SOTP sum-of-the-parts 🔜 / batch portfolio 🔜 |
+| **Stage 3** | 🔮 research | LLM-generated dynamic assumptions (Claude API) |
+
+### About stage 3 (LLM assumption generation)
+
+The sector table is "static" — it doesn't know what special catalyst a company has right now. Stage 3 will integrate the Claude API to dynamically generate sharper three-scenario assumptions from a company's live situation.
+
+**It's optional, and BYOK (Bring Your Own Key):**
+
+```bash
+# Once stage 3 is enabled (currently a reserved interface)
 export ANTHROPIC_API_KEY="sk-ant-xxxxx"
 python -m valuate TSLA --use-llm
 ```
 
-- 使用者需自備 [Anthropic API key](https://console.anthropic.com)
-- 成本約每次估值 $0.01–0.05，直接付給 Anthropic（作者不經手任何費用）
-- 沒有 API key 時，工具自動 fallback 回產業分類表（免費版照常運作）
+- You supply your own [Anthropic API key](https://console.anthropic.com)
+- Roughly $0.01-0.05 per valuation, paid directly to Anthropic (the author never handles any fees)
+- Without an API key the tool falls back to the sector table (the free version works as usual)
 
 ---
 
-## 專案結構
+## Project structure
 
 ```
 stock-scenario-valuation/
 ├── valuate/
-│   ├── cli.py                  # 命令列入口 (--method pe/dcf)
-│   ├── fetcher.py              # yfinance 資料抓取 (含 DCF 財報 + Rf)
-│   ├── sector_map.py           # 產業 → P/E 對照表 (核心 know-how)
-│   ├── engine.py               # P/E 法估值引擎 (階段一)
-│   ├── dcf.py                  # DCF 法估值引擎 (階段二)
-│   ├── wacc.py                 # WACC 計算 + 護欄 (階段二)
-│   ├── dcf_params.py           # DCF 房屋假設 (ERP/g_終/護欄)
-│   ├── output.py               # 終端 / Excel 輸出 (P/E + DCF)
+│   ├── cli.py                  # CLI entry point (--method pe/dcf/peg/both)
+│   ├── fetcher.py              # yfinance data fetch (incl. DCF financials + Rf)
+│   ├── sector_map.py           # sector -> P/E table (core know-how)
+│   ├── engine.py               # P/E valuation engine (stage 1)
+│   ├── dcf.py                  # DCF valuation engine (stage 2)
+│   ├── wacc.py                 # WACC computation + guardrails (stage 2)
+│   ├── dcf_params.py           # DCF house assumptions (ERP/g_inf/exit multiple/guardrails)
+│   ├── peg.py                  # PEG growth-adjusted engine (stage 2+)
+│   ├── peg_params.py           # PEG house assumptions (target PEG / gating thresholds)
+│   ├── datasources.py          # EDGAR historical EPS + FMP estimated EPS sources
+│   ├── output.py               # terminal / Excel output (P/E + DCF + PEG)
 │   └── assumptions/
-│       ├── base.py             # 假設引擎抽象介面
-│       ├── sector_based.py     # 階段一：產業分類
-│       └── llm_based.py        # 階段三：LLM (預留)
+│       ├── base.py             # assumption-engine abstract interface
+│       ├── sector_based.py     # stage 1: sector classification
+│       └── llm_based.py        # stage 3: LLM (reserved)
 ├── examples/
 ├── tests/
+├── backtest_valuation.py       # DCF calibration backtest (cash cows vs growth)
 ├── requirements.txt
 ├── LICENSE
 └── README.md
@@ -226,19 +291,19 @@ stock-scenario-valuation/
 
 ---
 
-## 免責聲明
+## Disclaimer
 
-本工具產出的所有估值為**情境分析與教育用途，不構成投資建議**。
+All valuations produced by this tool are **scenario analysis for educational purposes and do not constitute investment advice**.
 
-- 產業倍數為經驗法則，可能不適用於特定公司或市場狀況
-- yfinance 資料可能延遲或不準確
-- 虧損公司（EPS ≤ 0）的 P/E 法不適用，結果僅供參考
-- 投資決策請自行研究並諮詢專業意見
+- Sector multiples are rules of thumb and may not fit a specific company or market regime
+- yfinance data may be delayed or inaccurate
+- The P/E method does not apply to loss-making companies (EPS ≤ 0); results are for reference only
+- Do your own research and consult a professional before making investment decisions
 
-作者不對任何依本工具做出的投資決策負責。
+The author is not responsible for any investment decision made based on this tool.
 
 ---
 
-## 授權
+## License
 
 [MIT License](LICENSE) © Watson Tsai

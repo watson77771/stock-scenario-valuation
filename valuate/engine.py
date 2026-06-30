@@ -66,8 +66,8 @@ class ValuationEngine:
         """
         if not company.is_valid:
             raise ValueError(
-                f"{company.ticker} 資料不足無法估值 "
-                f"(現價={company.current_price}, "
+                f"{company.ticker} insufficient data to value "
+                f"(price={company.current_price}, "
                 f"forward_eps={company.forward_eps}, "
                 f"trailing_eps={company.trailing_eps})"
             )
@@ -109,20 +109,19 @@ class ValuationEngine:
         # 5. 警示
         if eps_type == "trailing":
             result.warnings.append(
-                "使用 trailing EPS (無 forward 預估),估值偏保守"
+                "Using trailing EPS (no forward estimate); valuation is conservative"
             )
         if eps <= 0:
             result.warnings.append(
-                "EPS <= 0 (公司虧損中),P/E 法不適用,結果僅供參考"
+                "EPS <= 0 (company is loss-making); P/E method N/A, results for reference only"
             )
         if company.analyst_target_mean:
-            # 比對自己的 Base vs 分析師
             diff = result.base_target / company.analyst_target_mean - 1
             if abs(diff) > 0.30:
                 result.warnings.append(
-                    f"Base 目標 (${result.base_target}) 與分析師均價 "
-                    f"(${company.analyst_target_mean:.0f}) 差異 {diff:+.0%},"
-                    f"產業倍數可能需調整"
+                    f"Base target (${result.base_target}) vs analyst avg "
+                    f"(${company.analyst_target_mean:.0f}) differ {diff:+.0%}; "
+                    f"sector multiples may need adjustment"
                 )
 
         return result

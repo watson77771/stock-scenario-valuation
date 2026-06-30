@@ -21,7 +21,7 @@ from typing import Optional
 try:
     import yfinance as yf
 except ImportError:
-    raise ImportError("缺少 yfinance,請執行: pip install yfinance")
+    raise ImportError("yfinance not installed. Run: pip install yfinance")
 
 
 @dataclass
@@ -101,7 +101,11 @@ class CompanyData:
 
     @property
     def fcf_cagr(self) -> Optional[float]:
-        """歷史 FCF 複合成長率 (需 >=2 個正值;fcf_history 約定為舊→新)"""
+        """歷史 FCF 複合成長率 (需 >=2 個正值;fcf_history 約定為舊→新)。
+
+        注意: 只取頭尾兩點,對端點雜訊極敏感 (最新年 capex 暴增就會算出假性負成長)。
+        DCF 引擎優先用 fcf_growth_robust;此屬性保留供對照與向後相容。
+        """
         h = [x for x in self.fcf_history if x and x > 0]
         if len(h) < 2:
             return None
@@ -109,6 +113,26 @@ class CompanyData:
             return (h[-1] / h[0]) ** (1 / (len(h) - 1)) - 1
         except (ValueError, ZeroDivisionError):
             return None
+
+    @property
+    def fcf_growth_robust(self) -> Optional[float]:
+        """穩健的歷史 FCF 成長率 = 逐年 YoY 成長率的「中位數」。
+
+        相較 fcf_cagr 只看頭尾兩點,中位數對單一年度的 capex 高峰 / 一次性項目
+        更不敏感 (一個離群年份不會主導結果),作為 DCF Base 成長錨更可靠。
+        需至少 2 個相鄰、皆為正的 FCF 才計算;資料不足回 None。
+        """
+        h = [x for x in self.fcf_history if x is not None]
+        yoy = []
+        for prev, cur in zip(h, h[1:]):
+            if prev and prev > 0 and cur and cur > 0:
+                yoy.append(cur / prev - 1)
+        if not yoy:
+            return None
+        yoy.sort()
+        n = len(yoy)
+        mid = n // 2
+        return yoy[mid] if n % 2 else (yoy[mid - 1] + yoy[mid]) / 2
 
     @property
     def has_dcf_data(self) -> bool:
@@ -210,13 +234,13 @@ def fetch_risk_free_rate() -> tuple[float, str]:
             if not hist.empty:
                 raw = float(hist["Close"].iloc[-1])
         if raw is None:
-            return P.RISK_FREE_FALLBACK, f"無法取得 ^TNX,用後備 Rf={P.RISK_FREE_FALLBACK:.1%}"
+            return P.RISK_FREE_FALLBACK, f"^TNX unavailable; using fallback Rf={P.RISK_FREE_FALLBACK:.1%}"
         raw = float(raw)
-        # ^TNX 單位處理: 可能報 4.3 (%) 或舊制 43.0 (×10)
+        # ^TNX unit handling: may report 4.3 (%) or legacy 43.0 (x10)
         rate = raw / 1000 if raw > 25 else raw / 100
-        return round(rate, 4), f"10Y 美債 ^TNX={raw:g} → Rf={rate:.2%}"
+        return round(rate, 4), f"10Y UST ^TNX={raw:g} -> Rf={rate:.2%}"
     except Exception as e:
-        return P.RISK_FREE_FALLBACK, f"^TNX 抓取失敗 ({e}),用後備 Rf={P.RISK_FREE_FALLBACK:.1%}"
+        return P.RISK_FREE_FALLBACK, f"^TNX fetch failed ({e}); using fallback Rf={P.RISK_FREE_FALLBACK:.1%}"
 
 
 def fetch_company(ticker: str, fetch_dcf: bool = False) -> CompanyData:
@@ -237,7 +261,7 @@ def fetch_company(ticker: str, fetch_dcf: bool = False) -> CompanyData:
     try:
         t = yf.Ticker(ticker)
     except Exception as e:
-        data.fetch_errors.append(f"無法建立 Ticker 物件: {e}")
+        data.fetch_errors.append(f"Failed to create Ticker object: {e}")
         return data
 
     # 現價: fast_info 優先 (快又穩)
@@ -249,13 +273,13 @@ def fetch_company(ticker: str, fetch_dcf: bool = False) -> CompanyData:
                 price = float(hist["Close"].iloc[-1])
         data.current_price = float(price) if price else None
     except Exception as e:
-        data.fetch_errors.append(f"現價抓取失敗: {e}")
+        data.fetch_errors.append(f"Price fetch failed: {e}")
 
     # 其餘資料來自 info (較慢但完整)
     try:
         info = t.info
     except Exception as e:
-        data.fetch_errors.append(f"info 抓取失敗: {e}")
+        data.fetch_errors.append(f"info fetch failed: {e}")
         info = {}
 
     if info:
@@ -295,18 +319,18 @@ def fetch_company(ticker: str, fetch_dcf: bool = False) -> CompanyData:
             if series:
                 data.fcf_history = series
         except Exception as e:
-            data.fetch_errors.append(f"現金流量表抓取失敗: {e}")
+            data.fetch_errors.append(f"Cash-flow statement fetch failed: {e}")
 
         # 基準 FCF: 優先用年度現金流量表最新值 (比 info TTM 穩定),否則退回 info TTM
         if data.fcf_history:
             data.free_cashflow = data.fcf_history[-1]
-            data.fcf_source = "年度現金流量表最新值"
+            data.fcf_source = "latest annual cash-flow statement"
             # 與 info TTM 對照,差異大代表近期可能有一次性項目
             if (info_fcf and data.free_cashflow
                     and abs(info_fcf / data.free_cashflow - 1) > 0.25):
                 data.fetch_errors.append(
-                    f"FCF 資料分歧 (年度 ${data.free_cashflow / 1e9:.1f}B vs "
-                    f"TTM ${info_fcf / 1e9:.1f}B),近期可能含一次性項目,建議手動檢視"
+                    f"FCF divergence (annual ${data.free_cashflow / 1e9:.1f}B vs "
+                    f"TTM ${info_fcf / 1e9:.1f}B); recent period may include one-off items, manual review advised"
                 )
         elif info_fcf is not None:
             data.free_cashflow = info_fcf
@@ -321,7 +345,7 @@ def fetch_company(ticker: str, fetch_dcf: bool = False) -> CompanyData:
             data.tax_provision = _stmt_latest(
                 fin, "Tax Provision", "Income Tax Expense")
         except Exception as e:
-            data.fetch_errors.append(f"損益表抓取失敗: {e}")
+            data.fetch_errors.append(f"Income statement fetch failed: {e}")
 
         # 幣別統一: 財報(可能 TWD/KRW 等) vs 股價(USD)。ADR 常見不一致,
         # 不換算會讓 DCF 結果差數十倍。把所有「絕對金額」換成 USD;
@@ -332,8 +356,8 @@ def fetch_company(ticker: str, fetch_dcf: bool = False) -> CompanyData:
             rate = _fx_to_usd(fin_cur)
             if rate is None:
                 data.fetch_errors.append(
-                    f"財報幣別為 {fin_cur} 但匯率抓取失敗,DCF 無法統一為 USD,請改用 P/E 法")
-                data.free_cashflow = None          # 阻擋 DCF,避免輸出幣別混亂的垃圾
+                    f"Financials are in {fin_cur} but FX fetch failed; DCF can't be unified to USD, use P/E method")
+                data.free_cashflow = None          # block DCF to avoid currency-mixed garbage
             else:
                 if data.free_cashflow is not None:
                     data.free_cashflow *= rate
@@ -344,9 +368,9 @@ def fetch_company(ticker: str, fetch_dcf: bool = False) -> CompanyData:
                     data.total_cash *= rate
                 if data.interest_expense is not None:
                     data.interest_expense *= rate
-                data.fcf_source += f" (由 {fin_cur} 換算 USD)"
+                data.fcf_source += f" (converted from {fin_cur} to USD)"
                 data.fetch_errors.append(
-                    f"財報幣別 {fin_cur} 已換算為 USD (匯率 {rate:.4f});"
-                    f"ADR 估值含匯率風險,僅供參考")
+                    f"Financials in {fin_cur} converted to USD (FX {rate:.4f}); "
+                    f"ADR valuation carries FX risk, for reference only")
 
     return data

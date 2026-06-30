@@ -1,17 +1,18 @@
 """
 cli.py
 ======
-命令列入口。
+Command-line entry point.
 
-用法:
-  python -m valuate AVGO                  # P/E 法 (產業分類表假設)
-  python -m valuate AVGO --excel          # 同時產出 xlsx
-  python -m valuate NVDA TSLA AAPL        # 多家公司
-  python -m valuate AAPL --method dcf     # 用 DCF 現金流折現法 (階段二)
+Usage:
+  python -m valuate AVGO                  # P/E method (sector-table assumptions)
+  python -m valuate AVGO --excel          # also write xlsx
+  python -m valuate NVDA TSLA AAPL        # multiple companies
+  python -m valuate AAPL --method dcf     # DCF (discounted cash flow)
   python -m valuate AAPL --method dcf --excel
-  python -m valuate AAPL --method both    # P/E 與 DCF 並排交叉比較
-  python -m valuate AVGO --use-llm        # 用 Claude API (階段三,需 API key)
-  python -m valuate --list-sectors        # 列出支援的產業
+  python -m valuate AAPL --method peg     # growth-adjusted (EDGAR history + FMP estimates)
+  python -m valuate AAPL --method both    # P/E, DCF, PEG side-by-side cross-check
+  python -m valuate AVGO --use-llm        # Claude API assumptions (stage 3, needs API key)
+  python -m valuate --list-sectors        # list supported sectors
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import argparse
 import io
 import sys
 
-# Windows 編碼修正
+# Windows encoding fix
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
@@ -27,15 +28,27 @@ if sys.platform == "win32":
 from .fetcher import fetch_company, fetch_risk_free_rate
 from .engine import ValuationEngine
 from .dcf import DCFEngine
+from .peg import PEGEngine
+from .datasources import fetch_eps_history_edgar, fetch_forward_eps_fmp
 from .assumptions.sector_based import SectorBasedAssumptions
 from .assumptions.llm_based import LLMBasedAssumptions
 from .output import (print_result, write_xlsx, print_dcf_result,
-                     write_dcf_xlsx, print_comparison)
+                     write_dcf_xlsx, print_comparison, print_peg_result,
+                     write_peg_xlsx)
 from . import sector_map
 
 
+def _run_peg(company):
+    """Fetch EDGAR historical EPS + FMP forward EPS, run the PEG engine."""
+    eps_hist, eps_note = fetch_eps_history_edgar(company.ticker)
+    print(f"  i  {eps_note}")
+    fwd, fwd_note = fetch_forward_eps_fmp(company.ticker)
+    print(f"  i  {fwd_note}")
+    return PEGEngine().value(company, eps_history=eps_hist, fwd_estimates=fwd)
+
+
 def build_engine(use_llm: bool) -> ValuationEngine:
-    """根據參數選擇假設引擎"""
+    """Pick the assumption engine based on flags."""
     if use_llm:
         assumption_engine = LLMBasedAssumptions(fallback=True)
     else:
@@ -45,16 +58,16 @@ def build_engine(use_llm: bool) -> ValuationEngine:
 
 def run_one(ticker: str, engine, to_excel: bool, output_dir: str,
             method: str = "pe", dcf_engine=None):
-    """估值單一公司 (method = 'pe' / 'dcf' / 'both')"""
-    print(f"\n→ 抓取 {ticker} ...")
+    """Value a single company (method = 'pe' / 'dcf' / 'peg' / 'both')."""
+    print(f"\n-> Fetching {ticker} ...")
     company = fetch_company(ticker, fetch_dcf=(method in ("dcf", "both")))
 
     if company.fetch_errors:
         for e in company.fetch_errors:
-            print(f"  ⚠️  {e}")
+            print(f"  !  {e}")
 
     if method == "both":
-        pe_res = dcf_res = None
+        pe_res = dcf_res = peg_res = None
         if company.is_valid:
             try:
                 pe_res = engine.value(company)
@@ -65,80 +78,98 @@ def run_one(ticker: str, engine, to_excel: bool, output_dir: str,
                 dcf_res = dcf_engine.value(company)
             except ValueError:
                 pass
-        if pe_res is None and dcf_res is None:
-            print(f"  ❌ {ticker} 兩種方法都無法估值")
+        if company.is_valid:
+            try:
+                peg_res = _run_peg(company)
+            except Exception as e:
+                print(f"  !  PEG skipped: {e}")
+        if pe_res is None and dcf_res is None and peg_res is None:
+            print(f"  X  {ticker}: all three methods failed to value")
             return
-        print_comparison(pe_res, dcf_res)
+        print_comparison(pe_res, dcf_res, peg_res)
         if to_excel:
             if pe_res:
-                print(f"  📄 已輸出: {write_xlsx(pe_res, output_dir)}")
+                print(f"  Saved: {write_xlsx(pe_res, output_dir)}")
             if dcf_res:
-                print(f"  📄 已輸出: {write_dcf_xlsx(dcf_res, output_dir)}")
+                print(f"  Saved: {write_dcf_xlsx(dcf_res, output_dir)}")
+            if peg_res:
+                print(f"  Saved: {write_peg_xlsx(peg_res, output_dir)}")
             print()
+        return
+
+    if method == "peg":
+        if not company.is_valid:
+            print(f"  X  {ticker}: insufficient data (missing price/EPS), can't run PEG")
+            return
+        result = _run_peg(company)
+        print_peg_result(result)
+        if to_excel:
+            print(f"  Saved: {write_peg_xlsx(result, output_dir)}\n")
         return
 
     if method == "dcf":
         if not company.has_dcf_data:
-            print(f"  ❌ {ticker} 缺 DCF 必要資料 (FCF/股數/現價),"
-                  f"無法用 DCF 法 (可改用預設 P/E 法)")
+            print(f"  X  {ticker}: missing required DCF data (FCF/shares/price), "
+                  f"can't run DCF (try the default P/E method)")
             return
         try:
             result = engine.value(company)
         except ValueError as e:
-            print(f"  ❌ {e}")
+            print(f"  X  {e}")
             return
         print_dcf_result(result)
         if to_excel:
             path = write_dcf_xlsx(result, output_dir)
-            print(f"  📄 已輸出: {path}\n")
+            print(f"  Saved: {path}\n")
         return
 
-    # --- 預設 P/E 法 ---
+    # --- default P/E method ---
     if not company.is_valid:
-        print(f"  ❌ {ticker} 資料不足,無法估值 (可能是無效代號或資料源問題)")
+        print(f"  X  {ticker}: insufficient data to value (invalid ticker or data-source issue)")
         return
 
     try:
         result = engine.value(company)
     except ValueError as e:
-        print(f"  ❌ {e}")
+        print(f"  X  {e}")
         return
 
     print_result(result)
 
     if to_excel:
         path = write_xlsx(result, output_dir)
-        print(f"  📄 已輸出: {path}\n")
+        print(f"  Saved: {path}\n")
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="valuate",
-        description="股票三情境估值工具 (Bear/Base/Bull)",
+        description="Three-scenario stock valuation tool (Bear/Base/Bull)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("tickers", nargs="*", help="股票代號 (可多個)")
-    parser.add_argument("--method", choices=["pe", "dcf", "both"], default="pe",
-                        help="估值方法: pe=本益比法(預設) / dcf=現金流折現法(階段二) / "
-                             "both=兩法並排交叉比較")
-    parser.add_argument("--excel", action="store_true", help="產出 xlsx 報告")
+    parser.add_argument("tickers", nargs="*", help="ticker symbols (one or more)")
+    parser.add_argument("--method", choices=["pe", "dcf", "peg", "both"], default="pe",
+                        help="valuation method: pe=P/E (default) / dcf=discounted cash flow / "
+                             "peg=growth-adjusted (EDGAR history + FMP estimates) / "
+                             "both=all three side-by-side")
+    parser.add_argument("--excel", action="store_true", help="write an xlsx report")
     parser.add_argument("--use-llm", action="store_true",
-                        help="用 Claude API 生成假設 (階段三,需 ANTHROPIC_API_KEY;僅 P/E 法)")
-    parser.add_argument("--output-dir", default=".", help="xlsx 輸出目錄")
+                        help="use Claude API for assumptions (stage 3, needs ANTHROPIC_API_KEY; P/E only)")
+    parser.add_argument("--output-dir", default=".", help="xlsx output directory")
     parser.add_argument("--list-sectors", action="store_true",
-                        help="列出所有支援的產業分類")
+                        help="list all supported sector classifications")
     args = parser.parse_args()
 
     if args.list_sectors:
         supported = sector_map.list_supported()
-        print("\n支援的細分產業 (industry):")
+        print("\nSupported industries (fine):")
         for ind in supported["industries"]:
             print(f"  - {ind}")
-        print("\n支援的粗分產業 (sector):")
+        print("\nSupported sectors (coarse):")
         for sec in supported["sectors"]:
             print(f"  - {sec}")
-        print("\n其他產業會 fallback 至通用預設 P/E 12/18/26x\n")
+        print("\nOther sectors fall back to the generic default P/E 12/18/26x\n")
         return
 
     if not args.tickers:
@@ -147,7 +178,7 @@ def main():
 
     if args.method in ("dcf", "both"):
         rf, rf_note = fetch_risk_free_rate()
-        print(f"  ℹ️  {rf_note}")
+        print(f"  i  {rf_note}")
 
     dcf_engine = None
     if args.method == "dcf":

@@ -22,8 +22,10 @@ from __future__ import annotations
 # ============================================================
 
 # 股權風險溢酬 (Equity Risk Premium | 株式リスクプレミアム)
-# 來源: Damodaran 美股長期 ERP,約 4.5%–5.5%。屬「判斷」,建議每季人工檢視。
-EQUITY_RISK_PREMIUM = 0.050          # Damodaran 2026 估計
+# 來源: Damodaran 美股 implied ERP,2025-26 約 4.3%–4.6%。屬「判斷」,每季人工檢視。
+# 註: 4.5% 比舊值 5.0% 更貼近當前 implied ERP;ERP 每高 0.5pp,WACC 約高 0.4-0.5pp,
+#     而 WACC 每高 1pp 終值倍數掉約 1.5-2x → 是 DCF 系統性偏低的次要來源之一。
+EQUITY_RISK_PREMIUM = 0.045          # 校準至當前 implied ERP (原 0.050 偏高)
 
 # 終值永續成長率 (Terminal / Perpetuity Growth)
 # 硬約束: 必須 < 無風險利率 (公司不可能永遠長得比經濟快) 且 < WACC (否則公式發散)
@@ -42,7 +44,8 @@ RISK_FREE_FALLBACK = 0.040
 # 第 2 層:公司結構 (算一次,三情境固定)
 # ============================================================
 
-BETA_CLAMP = (0.5, 2.0)              # yfinance beta 很吵,夾擠到合理區間
+BETA_CLAMP = (0.5, 1.6)              # yfinance beta 很吵,夾擠到合理區間 (上限由 2.0 收至 1.6,
+                                     #   避免極端 beta 把 WACC 推到不合理的高位,壓垮終值)
 TAX_CLAMP = (0.0, 0.25)             # 有效稅率夾擠 (虧損年會出現負值 / 破百)
 TAX_FALLBACK = 0.21                 # 美國法定稅率,稅率算不出時用
 COST_OF_DEBT_FALLBACK_SPREAD = 0.020  # 無利息資料時: Rd = Rf + 此利差
@@ -70,7 +73,37 @@ GROWTH_CLAMP = (-0.02, 0.25)        # 單一情境成長率合理上下限
 # 模型參數
 # ============================================================
 
-PROJECTION_YEARS = 5                # 明確預測期 (explicit forecast) 年數
+PROJECTION_YEARS = 10              # 明確預測期 (explicit forecast) 年數
+#   由 5 年拉長至 10 年 —— 這是 DCF 系統性偏低的「主因」修正。
+#   5 年明確期 + Gordon 永續會把高成長公司的成長期過早截斷成永續低成長,
+#   使隱含 EV/FCF 只到 13-16x (市場給優質複利機器 25-40x)。拉長明確期讓更多
+#   高成長年份被計入,而非一刀切進終值。
+
+# 兩段式成長 (two-stage fade): 成長率於明確期內由 g_start 線性衰減至終值成長 g_終。
+# 真實企業成長會隨規模遞減,線性 fade 比「前 N 年固定高成長後驟降」更貼近現實,
+# 也避免明確期維持高成長導致估值爆衝。
+FADE_TO_TERMINAL = True
+
+# --- 終值雙軌制 (dual-track terminal value) ---
+# 純 Gordon 永續成長在 WACC~10% 時隱含終值倍數僅約 13x,遠低於市場對成熟優質
+# 企業的定價。改用「Gordon 永續 + 出場 EV/FCF 倍數」加權平均,讓終值錨定到
+# 市場可實現的倍數水準,同時保留 Gordon 的紀律,並降低對單一假設的脆弱度。
+TERMINAL_METHOD_BLEND = 0.5        # Gordon 權重 (0 = 全用出場倍數, 1 = 全用 Gordon)
+
+# 出場 EV/FCF 倍數 = 公司進入成熟期後合理的現金流倍數 (非當前高成長倍數)。
+# 對應「終值時點公司已是穩定金牛」的假設;三情境反映成熟期估值的樂觀/中性/悲觀。
+EXIT_FCF_MULTIPLE = {
+    "bear": 13.0,
+    "base": 18.0,
+    "bull": 24.0,
+}
+
+# --- 基準 FCF 正規化 (normalization) ---
+# DCF 對「基準 FCF」極度敏感,而單一最新年度 FCF 易被 capex 高峰 / 一次性項目扭曲
+# (例: 2025-26 大型科技/半導體 AI 資本支出超級循環,當期 FCF 被壓低,反映投資而非
+#  價值毀損)。改用近 N 年中位數為基準,抵銷單一年度雜訊。
+FCF_NORMALIZE_YEARS = 3            # 取最近 N 個年度 FCF 的中位數為正規化基準
+FCF_NORMALIZE_DIVERGENCE_WARN = 0.25  # 正規化值與最新年度差異 > 此值即警示
 
 
 # ============================================================

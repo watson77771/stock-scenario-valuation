@@ -26,24 +26,24 @@ from .base import AssumptionEngine, ScenarioAssumption
 from .sector_based import SectorBasedAssumptions
 
 
-# 提示詞模板 (階段三實作時使用)
+# Prompt template (used when stage 3 is implemented)
 _PROMPT_TEMPLATE = """\
-你是資深股票分析師。根據以下公司資訊,給出合理的三情境 (Bear/Base/Bull) Forward P/E 倍數。
+You are a senior equity analyst. Given the company info below, provide reasonable three-scenario (Bear/Base/Bull) forward P/E multiples.
 
-公司: {name} ({ticker})
-產業 (sector): {sector}
-細分 (industry): {industry}
-目前 Forward P/E: {forward_pe}
-目前 Trailing P/E: {trailing_pe}
-分析師目標均價: {analyst_target}
+Company: {name} ({ticker})
+Sector: {sector}
+Industry: {industry}
+Current forward P/E: {forward_pe}
+Current trailing P/E: {trailing_pe}
+Analyst mean target: {analyst_target}
 
-請考慮:
-1. 該產業當下的估值水位與市場情緒
-2. 該公司相對同業的成長性與護城河
-3. 近期可能的催化劑或風險
+Consider:
+1. The sector's current valuation level and market sentiment
+2. The company's growth and moat relative to peers
+3. Likely near-term catalysts or risks
 
-只回傳 JSON,格式如下,不要任何其他文字:
-{{"bear_pe": <數字>, "base_pe": <數字>, "bull_pe": <數字>, "rationale": "<一句話理由>"}}
+Return JSON only, in this exact format, with no other text:
+{{"bear_pe": <number>, "base_pe": <number>, "bull_pe": <number>, "rationale": "<one-sentence reason>"}}
 """
 
 
@@ -64,13 +64,13 @@ class LLMBasedAssumptions(AssumptionEngine):
     def generate(self, company) -> ScenarioAssumption:
         # 檢查前提
         if not self.api_key:
-            print("  ⚠️  未設定 ANTHROPIC_API_KEY,LLM 假設不可用")
+            print("  !  ANTHROPIC_API_KEY not set; LLM assumptions unavailable")
             if self.fallback:
-                print("     → fallback 回產業分類表")
+                print("     -> falling back to the sector table")
                 result = self._fallback_engine.generate(company)
                 result.source += " (LLM fallback)"
                 return result
-            raise RuntimeError("需要 ANTHROPIC_API_KEY 才能使用 LLM 假設")
+            raise RuntimeError("ANTHROPIC_API_KEY is required to use LLM assumptions")
 
         # ===================================================
         # TODO (階段三實作):
@@ -87,10 +87,10 @@ class LLMBasedAssumptions(AssumptionEngine):
         #   7. 加 try/except: API 失敗時 fallback 回 sector_based
         # ===================================================
 
-        print("  ⚠️  LLM 假設引擎尚未實作 (階段三功能)")
+        print("  !  LLM assumption engine not yet implemented (stage 3 feature)")
         if self.fallback:
-            print("     → 目前 fallback 回產業分類表")
+            print("     -> falling back to the sector table for now")
             result = self._fallback_engine.generate(company)
             result.source += " (LLM not-yet-implemented)"
             return result
-        raise NotImplementedError("LLMBasedAssumptions 為階段三功能,尚未實作")
+        raise NotImplementedError("LLMBasedAssumptions is a stage-3 feature, not yet implemented")

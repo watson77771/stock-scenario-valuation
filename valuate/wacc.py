@@ -56,12 +56,12 @@ def compute_wacc(company, rf: float) -> WACCResult:
     beta_raw = company.beta
     if beta_raw is None:
         beta_adj = 1.0
-        notes.append("無 beta 資料,假設 β=1.0")
+        notes.append("No beta data; assuming beta=1.0")
     else:
         blume = 0.67 * beta_raw + 0.33 * 1.0
         beta_adj = _clamp(blume, *P.BETA_CLAMP)
         if abs(beta_adj - blume) > 1e-9:
-            notes.append(f"β 經夾擠 (Blume {blume:.2f} → {beta_adj:.2f})")
+            notes.append(f"beta clamped (Blume {blume:.2f} -> {beta_adj:.2f})")
 
     # --- 股權成本 Re (CAPM) ---
     erp = P.EQUITY_RISK_PREMIUM
@@ -71,11 +71,11 @@ def compute_wacc(company, rf: float) -> WACCResult:
     tax = company.effective_tax_rate
     if tax is None:
         tax = P.TAX_FALLBACK
-        notes.append(f"無法計算有效稅率,用法定 {tax:.0%}")
+        notes.append(f"Effective tax rate unavailable; using statutory {tax:.0%}")
     else:
         clamped = _clamp(tax, *P.TAX_CLAMP)
         if abs(clamped - tax) > 1e-9:
-            notes.append(f"有效稅率經夾擠 ({tax:.0%} → {clamped:.0%})")
+            notes.append(f"Effective tax rate clamped ({tax:.0%} -> {clamped:.0%})")
         tax = clamped
 
     # --- 債務成本 Rd ---
@@ -84,11 +84,11 @@ def compute_wacc(company, rf: float) -> WACCResult:
         rd = abs(company.interest_expense) / total_debt
         clamped = _clamp(rd, *P.COST_OF_DEBT_CLAMP)
         if abs(clamped - rd) > 1e-9:
-            notes.append(f"債務成本經夾擠 ({rd:.1%} → {clamped:.1%})")
+            notes.append(f"Cost of debt clamped ({rd:.1%} -> {clamped:.1%})")
         rd = clamped
     else:
         rd = rf + P.COST_OF_DEBT_FALLBACK_SPREAD
-        notes.append(f"無利息/負債資料,債務成本用 Rf+{P.COST_OF_DEBT_FALLBACK_SPREAD:.1%}")
+        notes.append(f"No interest/debt data; cost of debt = Rf+{P.COST_OF_DEBT_FALLBACK_SPREAD:.1%}")
 
     # --- 資本結構權重 (用市值,非帳面值) ---
     E = company.market_cap or 0.0
@@ -96,7 +96,7 @@ def compute_wacc(company, rf: float) -> WACCResult:
     V = E + D
     if V <= 0:
         equity_weight, debt_weight = 1.0, 0.0
-        notes.append("無市值/負債資料,假設 100% 股權結構")
+        notes.append("No market-cap/debt data; assuming 100% equity structure")
     else:
         equity_weight = E / V
         debt_weight = D / V
@@ -107,7 +107,7 @@ def compute_wacc(company, rf: float) -> WACCResult:
     lo, hi = P.WACC_SANITY
     if not (lo <= wacc <= hi):
         notes.append(
-            f"WACC {wacc:.1%} 落在合理區間 {lo:.0%}–{hi:.0%} 外,參數可能失真,請檢視"
+            f"WACC {wacc:.1%} outside sane range {lo:.0%}-{hi:.0%}; inputs may be distorted, please review"
         )
 
     return WACCResult(

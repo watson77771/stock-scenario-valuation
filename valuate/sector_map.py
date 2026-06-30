@@ -1,18 +1,18 @@
 """
 sector_map.py
 =============
-產業分類 → 三情境 P/E 倍數對照表。
+Sector classification -> three-scenario P/E multiple table.
 
-這是「階段一」估值假設的核心。yfinance 回傳每家公司的 sector / industry,
-本模組把它們對映到合理的 Bear / Base / Bull 本益比範圍。
+This is the core of the "stage 1" assumption. yfinance returns each company's
+sector / industry; this module maps them to sensible Bear / Base / Bull P/E ranges.
 
-設計理念:
-  - 不同產業的合理估值倍數差異巨大(半導體 vs 能源 vs 金融)
-  - 同一產業內,Bull/Base/Bear 反映市場情緒的樂觀/中性/悲觀
-  - 這些倍數是「判斷」,使用者可在 config 覆寫
+Design:
+  - Reasonable multiples differ greatly across sectors (semis vs energy vs banks)
+  - Within a sector, Bull/Base/Bear reflect optimistic/neutral/pessimistic sentiment
+  - These multiples are judgments; users can override in config
 
-資料來源: 作者(Watson)對多個產業的估值經驗 + 歷史本益比區間。
-免責: 這些是經驗法則,非投資建議。市場狀況改變時應調整。
+Source: the author's (Watson) valuation experience across sectors + historical P/E ranges.
+Disclaimer: these are rules of thumb, not investment advice. Adjust as markets change.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 @dataclass
 class PERange:
-    """單一產業的三情境本益比範圍"""
+    """Three-scenario P/E range for a single sector."""
     bear: float
     base: float
     bull: float
@@ -32,110 +32,107 @@ class PERange:
 
 
 # ============================================================
-# 產業 P/E 對照表
+# Sector P/E table
 # ============================================================
-# Key 對應 yfinance 的 sector (粗分) 或 industry (細分)
-# 細分 industry 優先於粗分 sector
+# Keys map to yfinance sector (coarse) or industry (fine).
+# Fine-grained industry takes priority over coarse sector.
 # ============================================================
 
-# --- 細分產業 (industry-level, 優先匹配) ---
+# --- Industry-level (fine, matched first) ---
 INDUSTRY_PE_RANGES: dict[str, PERange] = {
-    # 半導體相關 (高成長 + 週期 + AI 題材)
-    "Semiconductors": PERange(18, 28, 40, "AI 題材推升 / 週期性強 / 龍頭享溢價"),
-    "Semiconductor Equipment & Materials": PERange(16, 24, 34, "設備商 / 跟隨資本支出週期"),
+    # Semiconductors (high growth + cyclical + AI theme)
+    "Semiconductors": PERange(18, 28, 40, "AI tailwind / cyclical / leaders command a premium"),
+    "Semiconductor Equipment & Materials": PERange(16, 24, 34, "Equipment makers / track the capex cycle"),
 
-    # 軟體 (ARR 模式 / 高估值容忍)
-    "Software - Infrastructure": PERange(22, 34, 48, "基礎架構軟體 / 高黏著度"),
-    "Software - Application": PERange(20, 32, 45, "應用軟體 / SaaS ARR 溢價"),
+    # Software (ARR model / high multiple tolerance)
+    "Software - Infrastructure": PERange(22, 34, 48, "Infrastructure software / high stickiness"),
+    "Software - Application": PERange(20, 32, 45, "Application software / SaaS ARR premium"),
 
-    # 網路 / 媒體
-    "Internet Content & Information": PERange(18, 26, 36, "廣告 + 平台 / 受 AI 顛覆與監管影響"),
-    "Internet Retail": PERange(20, 32, 50, "電商 / 成長性主導估值"),
+    # Internet / media
+    "Internet Content & Information": PERange(18, 26, 36, "Ads + platform / exposed to AI disruption & regulation"),
+    "Internet Retail": PERange(20, 32, 50, "E-commerce / growth-driven valuation"),
 
-    # 硬體 / 設備
-    "Consumer Electronics": PERange(18, 26, 34, "品牌溢價 / 如 Apple 類"),
-    "Communication Equipment": PERange(14, 20, 28, "網通設備 / 較成熟"),
-    "Computer Hardware": PERange(12, 18, 26, "硬體 / 利潤率較低"),
+    # Hardware / equipment
+    "Consumer Electronics": PERange(18, 26, 34, "Brand premium / Apple-like"),
+    "Communication Equipment": PERange(14, 20, 28, "Networking gear / more mature"),
+    "Computer Hardware": PERange(12, 18, 26, "Hardware / lower margins"),
 
-    # 能源 (週期股 / 低估值)
-    "Oil & Gas Refining & Marketing": PERange(8, 12, 16, "煉油 / crack spread 週期"),
-    "Oil & Gas Integrated": PERange(9, 13, 18, "整合石油 / 受油價主導"),
-    "Oil & Gas E&P": PERange(7, 11, 15, "上游探勘 / 高週期"),
-    "Uranium": PERange(15, 30, 60, "核能題材 / pre-revenue 故事股波動大"),
-    "Solar": PERange(10, 18, 30, "政策驅動 / 補貼敏感"),
+    # Energy (cyclical / low multiple)
+    "Oil & Gas Refining & Marketing": PERange(8, 12, 16, "Refining / crack-spread cycle"),
+    "Oil & Gas Integrated": PERange(9, 13, 18, "Integrated oil / driven by oil price"),
+    "Oil & Gas E&P": PERange(7, 11, 15, "Upstream E&P / highly cyclical"),
+    "Uranium": PERange(15, 30, 60, "Nuclear theme / pre-revenue story stocks, very volatile"),
+    "Solar": PERange(10, 18, 30, "Policy-driven / subsidy-sensitive"),
 
-    # 金融
-    "Banks - Diversified": PERange(8, 11, 14, "大型銀行 / 受利率與監管影響"),
-    "Banks - Regional": PERange(7, 10, 13, "區域銀行 / 信用風險敏感"),
-    "Credit Services": PERange(12, 18, 26, "支付 / 信用卡 / 成長性較高"),
-    "Capital Markets": PERange(10, 15, 22, "投行 / 資產管理 / 市場連動"),
-    "Insurance - Diversified": PERange(8, 12, 16, "保險 / 穩健低成長"),
+    # Financials
+    "Banks - Diversified": PERange(8, 11, 14, "Large banks / rate- and regulation-sensitive"),
+    "Banks - Regional": PERange(7, 10, 13, "Regional banks / credit-risk sensitive"),
+    "Credit Services": PERange(12, 18, 26, "Payments / credit cards / higher growth"),
+    "Capital Markets": PERange(10, 15, 22, "Investment banks / asset mgmt / market-linked"),
+    "Insurance - Diversified": PERange(8, 12, 16, "Insurance / steady low growth"),
 
-    # 工業 / 國防
-    "Aerospace & Defense": PERange(15, 22, 30, "國防 / 訂單能見度高"),
-    "Specialty Industrial Machinery": PERange(14, 20, 28, "工業機械 / 跟隨景氣"),
+    # Industrials / defense
+    "Aerospace & Defense": PERange(15, 22, 30, "Defense / high order visibility"),
+    "Specialty Industrial Machinery": PERange(14, 20, 28, "Industrial machinery / tracks the cycle"),
 
-    # 礦業 / 原物料
-    "Other Industrial Metals & Mining": PERange(8, 15, 28, "金屬礦 / 商品價格主導 / 高波動"),
-    "Lithium": PERange(10, 20, 40, "鋰礦 / EV 需求 + pre-revenue 風險"),
+    # Mining / materials
+    "Other Industrial Metals & Mining": PERange(8, 15, 28, "Metals mining / commodity-price driven / high volatility"),
+    "Lithium": PERange(10, 20, 40, "Lithium / EV demand + pre-revenue risk"),
 
-    # 醫療
-    "Drug Manufacturers - General": PERange(12, 18, 26, "大藥廠 / 專利懸崖風險"),
-    "Biotechnology": PERange(15, 30, 60, "生技 / 臨床結果二元化 / 高波動"),
-    "Medical Devices": PERange(18, 26, 36, "醫材 / 穩健成長"),
+    # Healthcare
+    "Drug Manufacturers - General": PERange(12, 18, 26, "Big pharma / patent-cliff risk"),
+    "Biotechnology": PERange(15, 30, 60, "Biotech / binary trial outcomes / high volatility"),
+    "Medical Devices": PERange(18, 26, 36, "Medical devices / steady growth"),
 
-    # 消費
-    "Auto Manufacturers": PERange(8, 18, 35, "車廠 / 傳統低估值但 EV/AI 題材分歧極大"),
-    "Restaurants": PERange(18, 25, 35, "餐飲 / 品牌與展店"),
-    "Beverages - Non-Alcoholic": PERange(18, 24, 30, "飲料 / 防禦性消費"),
+    # Consumer
+    "Auto Manufacturers": PERange(8, 18, 35, "Automakers / traditionally low multiple but EV/AI themes diverge widely"),
+    "Restaurants": PERange(18, 25, 35, "Restaurants / brand and store expansion"),
+    "Beverages - Non-Alcoholic": PERange(18, 24, 30, "Beverages / defensive consumer"),
 
-    # Fintech / 加密
-    "Financial Data & Stock Exchanges": PERange(15, 25, 38, "金融數據 / 交易所"),
+    # Fintech / exchanges
+    "Financial Data & Stock Exchanges": PERange(15, 25, 38, "Financial data / exchanges"),
 }
 
-# --- 粗分產業 (sector-level, 細分找不到時的 fallback) ---
+# --- Sector-level (coarse, fallback when no industry match) ---
 SECTOR_PE_RANGES: dict[str, PERange] = {
-    "Technology": PERange(18, 28, 42, "科技 / 成長性主導"),
-    "Communication Services": PERange(15, 24, 36, "通訊服務 / 廣告 + 媒體"),
-    "Energy": PERange(8, 12, 17, "能源 / 週期股"),
-    "Financial Services": PERange(9, 13, 19, "金融 / 利率敏感"),
-    "Healthcare": PERange(14, 22, 32, "醫療 / 防禦 + 創新混合"),
-    "Consumer Cyclical": PERange(12, 20, 32, "景氣循環消費"),
-    "Consumer Defensive": PERange(16, 22, 28, "防禦性消費 / 穩定"),
-    "Industrials": PERange(14, 20, 28, "工業 / 跟隨景氣"),
-    "Basic Materials": PERange(9, 15, 26, "原物料 / 商品價格主導"),
-    "Real Estate": PERange(12, 18, 26, "房地產 / REITs / 利率敏感"),
-    "Utilities": PERange(14, 18, 22, "公用事業 / 防禦低成長"),
+    "Technology": PERange(18, 28, 42, "Technology / growth-driven"),
+    "Communication Services": PERange(15, 24, 36, "Communication services / ads + media"),
+    "Energy": PERange(8, 12, 17, "Energy / cyclical"),
+    "Financial Services": PERange(9, 13, 19, "Financials / rate-sensitive"),
+    "Healthcare": PERange(14, 22, 32, "Healthcare / defensive + innovation mix"),
+    "Consumer Cyclical": PERange(12, 20, 32, "Consumer cyclical"),
+    "Consumer Defensive": PERange(16, 22, 28, "Consumer defensive / stable"),
+    "Industrials": PERange(14, 20, 28, "Industrials / tracks the cycle"),
+    "Basic Materials": PERange(9, 15, 26, "Basic materials / commodity-price driven"),
+    "Real Estate": PERange(12, 18, 26, "Real estate / REITs / rate-sensitive"),
+    "Utilities": PERange(14, 18, 22, "Utilities / defensive low growth"),
 }
 
-# --- 最終 fallback (連 sector 都沒有) ---
-DEFAULT_PE_RANGE = PERange(12, 18, 26, "通用預設 / 無產業資訊")
+# --- Final fallback (no sector at all) ---
+DEFAULT_PE_RANGE = PERange(12, 18, 26, "Generic default / no sector info")
 
 
 def get_pe_range(sector: str | None, industry: str | None) -> tuple[PERange, str]:
     """
-    根據 yfinance 的 sector / industry 回傳合理的 P/E 範圍。
+    Return a sensible P/E range from yfinance sector / industry.
 
-    優先順序: industry (細分) > sector (粗分) > default
+    Priority: industry (fine) > sector (coarse) > default
 
     Returns:
-        (PERange, 匹配層級說明)
+        (PERange, match-level label)
     """
-    # 1. 先試細分 industry
     if industry and industry in INDUSTRY_PE_RANGES:
         return INDUSTRY_PE_RANGES[industry], f"industry: {industry}"
 
-    # 2. 退而求其次用粗分 sector
     if sector and sector in SECTOR_PE_RANGES:
         return SECTOR_PE_RANGES[sector], f"sector: {sector}"
 
-    # 3. 都沒有,用通用預設
     label = f"default (sector={sector}, industry={industry})"
     return DEFAULT_PE_RANGE, label
 
 
 def list_supported() -> dict:
-    """列出所有支援的產業(供 CLI --list-sectors 用)"""
+    """List all supported sectors (for CLI --list-sectors)."""
     return {
         "industries": sorted(INDUSTRY_PE_RANGES.keys()),
         "sectors": sorted(SECTOR_PE_RANGES.keys()),

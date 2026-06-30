@@ -23,7 +23,7 @@ class SectorBasedAssumptions(AssumptionEngine):
         pe_range, match_label = get_pe_range(company.sector, company.industry)
 
         rationale = (
-            f"依產業分類對照表 ({match_label})。"
+            f"Per sector-classification table ({match_label}). "
             f"{pe_range.note}"
         )
 

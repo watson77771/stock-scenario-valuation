@@ -18,6 +18,9 @@ from valuate.engine import ValuationEngine
 from valuate.fetcher import CompanyData
 from valuate.wacc import compute_wacc
 from valuate.dcf import DCFEngine
+from valuate.peg import PEGEngine
+from valuate.datasources import robust_eps_cagr
+import valuate.peg_params as PP
 
 
 class MockCompany:
@@ -113,7 +116,7 @@ def test_engine_negative_eps_warning():
     engine = ValuationEngine(SectorBasedAssumptions())
     r = engine.value(company)
 
-    assert any("虧損" in w for w in r.warnings)
+    assert any("loss-making" in w for w in r.warnings)
     print("✓ test_engine_negative_eps_warning")
 
 
@@ -137,7 +140,7 @@ def test_analyst_divergence_warning():
                           analyst=200.0)
     engine = ValuationEngine(SectorBasedAssumptions())
     r = engine.value(company)
-    assert any("分析師" in w for w in r.warnings)
+    assert any("analyst" in w for w in r.warnings)
     print("✓ test_analyst_divergence_warning")
 
 
@@ -208,10 +211,10 @@ def test_wacc_no_debt_equals_cost_of_equity():
 
 
 def test_wacc_beta_blume_clamp():
-    """高 beta 經 Blume 調整後仍被夾擠到上限 2.0"""
-    # Blume: 0.67*3.0 + 0.33*1.0 = 2.34 → clamp 至 2.0
+    """高 beta 經 Blume 調整後仍被夾擠到上限 1.6"""
+    # Blume: 0.67*3.0 + 0.33*1.0 = 2.34 → clamp 至 1.6 (上限由 2.0 收緊)
     w = compute_wacc(make_dcf_company(beta=3.0), rf=0.04)
-    assert w.beta_adj == 2.0
+    assert w.beta_adj == 1.6
     print("✓ test_wacc_beta_blume_clamp")
 
 
@@ -228,6 +231,142 @@ def test_fcf_cagr_property():
     c = make_dcf_company(fcf_history=[100.0, 141.42, 200.0])
     assert abs(c.fcf_cagr - 0.4142) < 0.001
     print("✓ test_fcf_cagr_property")
+
+
+# ============================================================
+# 階段二 DCF 校準修正測試 (兩段式 fade + 終值雙軌 + 正規化)
+# ============================================================
+
+def test_fcf_growth_robust_median():
+    """穩健成長 = YoY 中位數,對單一離群年份不敏感"""
+    # YoY: 100→110 (+10%), 110→121 (+10%), 121→60 (capex 暴增, -50.4%)
+    # 中位數 = +10%;若用頭尾 CAGR 會是負的 (100→60),被離群年份主導
+    c = make_dcf_company(fcf_history=[100.0, 110.0, 121.0, 60.0])
+    assert abs(c.fcf_growth_robust - 0.10) < 0.01
+    assert c.fcf_cagr is None or c.fcf_cagr < c.fcf_growth_robust
+    print("✓ test_fcf_growth_robust_median")
+
+
+def test_dcf_base_fcf_normalized_median():
+    """基準 FCF 取近年中位數,單一被壓低的最新年度不會主導估值"""
+    # 最新年度 5 億 (capex 高峰),前兩年各 10 億 → 中位數 = 10 億
+    c = make_dcf_company(fcf=5e8, fcf_history=[1e9, 1e9, 5e8])
+    r = DCFEngine(0.04).value(c)
+    # 正規化基準應 > 最新年度 5 億 (用了中位數,而非單一最新年度)
+    assert r.base_fcf > 5e8
+    # 且應觸發「正規化偏離」警示
+    assert any("Normalized" in w for w in r.warnings)
+    print("✓ test_dcf_base_fcf_normalized_median")
+
+
+def test_dcf_fade_reduces_explosiveness():
+    """兩段式 fade: 高起始成長不會讓估值無限爆衝 (成長率逐年衰減至終值)"""
+    high = make_dcf_company(fcf=1e9, fcf_history=[4e8, 6e8, 9e8, 1e9])  # 高歷史成長
+    r = DCFEngine(0.04).value(high)
+    # 即使起始成長被夾到上限 25%,fade 後 Bull 仍應有限 (不會出現天文數字)
+    assert r.bull.target < 10 * r.current_price
+    assert r.bull.target > r.base.target > r.bear.target > 0
+    print("✓ test_dcf_fade_reduces_explosiveness")
+
+
+def test_dcf_dual_terminal_lifts_value():
+    """終值雙軌 (混入出場倍數) 使隱含終值倍數高於純 Gordon 的 ~13x 下限"""
+    r = DCFEngine(0.04).value(make_dcf_company())
+    # Base 出場倍數 18x;混合後實際隱含倍數應落在 Gordon(~13x) 與 18x 之間,明顯 >13
+    assert r.base.implied_terminal_multiple > 13.0
+    assert r.base.exit_multiple == 18.0
+    print("✓ test_dcf_dual_terminal_lifts_value")
+
+
+# ============================================================
+# 階段二+ PEG 成長校正法測試 (離線,mock 資料)
+# ============================================================
+
+def make_peg_company(price=100.0, trailing_eps=5.0, forward_eps=5.0,
+                     sector="Technology", industry="Software - Application",
+                     analyst=None):
+    c = CompanyData(ticker="X")
+    c.name = "X"
+    c.current_price = price
+    c.trailing_eps = trailing_eps
+    c.forward_eps = forward_eps
+    c.sector = sector
+    c.industry = industry
+    c.analyst_target_mean = analyst
+    return c
+
+
+def test_robust_eps_cagr_median():
+    """穩健 EPS 成長 = YoY 中位數 (每年 +10% → 10%)"""
+    g = robust_eps_cagr([100, 110, 121, 133.1])
+    assert abs(g - 0.10) < 0.001
+    print("✓ test_robust_eps_cagr_median")
+
+
+def test_peg_ratios_basic():
+    """trailing / forward PEG 計算正確"""
+    c = make_peg_company(price=100, trailing_eps=5, forward_eps=5)
+    hist = [100, 110, 121, 133.1]                    # 歷史成長 10%
+    fwd = {"forward_eps": 5.0, "growth": 0.20, "eps_series": [5, 6, 7.2], "n_years": 3}
+    r = PEGEngine().value(c, eps_history=hist, fwd_estimates=fwd)
+    assert r.trailing_pe == 20.0
+    assert abs(r.trailing_peg - 2.0) < 0.01          # 20 / 10
+    assert r.forward_pe == 20.0
+    assert abs(r.forward_peg - 1.0) < 0.01           # 20 / 20
+    print("✓ test_peg_ratios_basic")
+
+
+def test_peg_growth_justified_target():
+    """成長校正目標價 = (成長% × 目標PEG) × EPS"""
+    c = make_peg_company(price=100, trailing_eps=5, forward_eps=5)
+    fwd = {"forward_eps": 5.0, "growth": 0.20, "eps_series": [5, 6, 7.2], "n_years": 3}
+    r = PEGEngine().value(c, eps_history=None, fwd_estimates=fwd)
+    # 用未來成長 20%,EPS 5。Base PEG 1.5 → 合理 PE = 20*1.5 = 30 → 目標 150
+    assert abs(r.base.fair_pe - 30.0) < 0.1
+    assert abs(r.base.target - 150.0) < 0.1
+    assert abs(r.bear.target - 100.0) < 0.1          # PEG 1.0 → PE 20 → 100
+    assert abs(r.bull.target - 200.0) < 0.1          # PEG 2.0 → PE 40 → 200
+    assert r.applicable
+    print("✓ test_peg_growth_justified_target")
+
+
+def test_peg_gating_low_growth():
+    """低成長 (<5%) 應 gating 為不適用並警示"""
+    c = make_peg_company(price=100, trailing_eps=5, forward_eps=5)
+    fwd = {"forward_eps": 5.0, "growth": 0.02, "eps_series": [5, 5.1, 5.2], "n_years": 3}
+    r = PEGEngine().value(c, fwd_estimates=fwd)
+    assert r.applicable is False
+    assert any("Low growth" in w for w in r.warnings)
+    print("✓ test_peg_gating_low_growth")
+
+
+def test_peg_gating_negative_eps():
+    """虧損 (EPS≤0) 應不適用,且不產目標價"""
+    c = make_peg_company(price=100, trailing_eps=-2.0, forward_eps=None)
+    r = PEGEngine().value(c, fwd_estimates=None)
+    assert r.applicable is False
+    assert r.base is None
+    assert any("loss-making" in w for w in r.warnings)
+    print("✓ test_peg_gating_negative_eps")
+
+
+def test_peg_gating_cyclical_sector_warns():
+    """景氣循環/金融產業應標適用性警示"""
+    c = make_peg_company(sector="Energy", industry="Oil & Gas E&P")
+    fwd = {"forward_eps": 5.0, "growth": 0.15, "eps_series": [5, 6, 7], "n_years": 3}
+    r = PEGEngine().value(c, fwd_estimates=fwd)
+    assert any("weak reference value" in w for w in r.warnings)
+    print("✓ test_peg_gating_cyclical_sector_warns")
+
+
+def test_peg_high_growth_clamped():
+    """超高成長 (>50%) 應警示且成長率夾至上限算目標價"""
+    c = make_peg_company(price=100, trailing_eps=5, forward_eps=5)
+    fwd = {"forward_eps": 5.0, "growth": 0.80, "eps_series": [5, 7, 9], "n_years": 3}
+    r = PEGEngine().value(c, fwd_estimates=fwd)
+    assert any("Very high growth" in w for w in r.warnings)
+    assert r.growth_used <= PP.GROWTH_CLAMP[1] + 1e-9   # 夾至 0.40
+    print("✓ test_peg_high_growth_clamped")
 
 
 def run_all():
@@ -251,6 +390,19 @@ def run_all():
         test_wacc_beta_blume_clamp,
         test_wacc_tax_from_statement,
         test_fcf_cagr_property,
+        # --- 階段二 DCF 校準修正 ---
+        test_fcf_growth_robust_median,
+        test_dcf_base_fcf_normalized_median,
+        test_dcf_fade_reduces_explosiveness,
+        test_dcf_dual_terminal_lifts_value,
+        # --- 階段二+ PEG 成長校正法 ---
+        test_robust_eps_cagr_median,
+        test_peg_ratios_basic,
+        test_peg_growth_justified_target,
+        test_peg_gating_low_growth,
+        test_peg_gating_negative_eps,
+        test_peg_gating_cyclical_sector_warns,
+        test_peg_high_growth_clamped,
     ]
     print("執行測試...\n")
     for t in tests:
