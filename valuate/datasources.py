@@ -110,18 +110,32 @@ def fetch_eps_history_edgar(ticker: str) -> tuple[list[float] | None, str]:
     if not facts:
         return None, f"EDGAR companyfacts fetch failed (CIK {cik})"
 
-    usgaap = facts.get("facts", {}).get("us-gaap", {})
-    # 優先稀釋 EPS,退而求其次基本 EPS
-    for concept in ("EarningsPerShareDiluted", "EarningsPerShareBasic"):
-        node = usgaap.get(concept)
+    all_facts = facts.get("facts", {})
+    # 涵蓋兩種申報體系:
+    #   - us-gaap (美國國內公司, 10-K)
+    #   - ifrs-full (外國發行人 / ADR, 20-F / 40-F, 用 IFRS 科目)
+    # 只用「稀釋優先,否則基本」EPS。
+    # 註: 這裡抓到的 EPS 只拿來算「成長率」(robust_eps_cagr 的逐年比值),
+    #     成長率對幣別與 ADR 比例都是不變量,所以 TWD/每股普通股 也 OK;
+    #     trailing PEG 的「水準」(PE) 在 peg.py 用 yfinance 的 USD/每 ADR EPS。
+    candidates = [
+        ("us-gaap", "EarningsPerShareDiluted"),
+        ("us-gaap", "EarningsPerShareBasic"),
+        ("ifrs-full", "DilutedEarningsLossPerShare"),
+        ("ifrs-full", "BasicEarningsLossPerShare"),
+    ]
+    ACCEPTED_FORMS = ("10-K", "20-F", "40-F")   # 40-F = 加拿大發行人
+    for ns, concept in candidates:
+        node = all_facts.get(ns, {}).get(concept)
         if not node:
             continue
         units = node.get("units", {})
+        # 優先 USD/shares;否則取任一單位 (只用於成長率,幣別不影響)
         rows = units.get("USD/shares") or next(iter(units.values()), [])
-        # 只取年度 (10-K, 全年 FY),以財年 fy 去重取最新申報值
+        # 只取年度 (10-K/20-F/40-F, 全年 FY),以財年 fy 去重取最新申報值
         by_fy: dict[int, dict] = {}
         for r in rows:
-            if r.get("form") != "10-K" or r.get("fp") != "FY":
+            if r.get("form") not in ACCEPTED_FORMS or r.get("fp") != "FY":
                 continue
             fy = r.get("fy")
             if fy is None or r.get("val") is None:
@@ -132,7 +146,8 @@ def fetch_eps_history_edgar(ticker: str) -> tuple[list[float] | None, str]:
                 by_fy[fy] = r
         if len(by_fy) >= PP.GROWTH_WINDOW_MIN:
             series = [by_fy[fy]["val"] for fy in sorted(by_fy)]
-            return series[-PP.GROWTH_WINDOW_YEARS:], f"EDGAR {concept}, last {min(len(series), PP.GROWTH_WINDOW_YEARS)} yrs"
+            n = min(len(series), PP.GROWTH_WINDOW_YEARS)
+            return series[-PP.GROWTH_WINDOW_YEARS:], f"EDGAR {ns}:{concept}, last {n} yrs"
     return None, "EDGAR: insufficient annual EPS data"
 
 

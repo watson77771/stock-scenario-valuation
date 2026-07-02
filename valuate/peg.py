@@ -88,13 +88,19 @@ class PEGEngine:
                        if (price and trail_eps and trail_eps > 0) else None)
         trailing_peg = _peg_ratio(trailing_pe, trailing_growth)
 
-        # --- forward 腿: FMP 預估 EPS ---
+        # --- forward 腿: FMP 預估成長 + yfinance EPS 水準 ---
+        # 成長率取 FMP (多年預估,幣別自動約掉,可靠);但 EPS「水準」必須與股價同幣別/單位。
+        # yfinance forward EPS 已是 USD/每 ADR;FMP epsAvg 對 ADR/外國發行人常是當地幣別
+        # (如 TWD) 或每股普通股 -> 直接拿來除美元股價會得到荒謬的 PE。故水準一律用 yfinance。
         forward_growth = fwd_estimates.get("growth") if fwd_estimates else None
-        fwd_eps = None
-        if fwd_estimates and fwd_estimates.get("forward_eps"):
-            fwd_eps = fwd_estimates["forward_eps"]
-        elif company.forward_eps:
-            fwd_eps = company.forward_eps          # 退回 yfinance forward EPS
+        fmp_eps = fwd_estimates.get("forward_eps") if fwd_estimates else None
+        fwd_eps = company.forward_eps if company.forward_eps else fmp_eps
+        if (fmp_eps and company.forward_eps and company.forward_eps > 0
+                and not (0.33 < fmp_eps / company.forward_eps < 3.0)):
+            warnings.append(
+                "FMP EPS differs greatly from yfinance EPS (likely a different currency/unit, "
+                "e.g. ADR / foreign filer in local currency); using yfinance USD EPS for price levels, "
+                "FMP for growth only")
         forward_pe = (round(price / fwd_eps, 2)
                       if (price and fwd_eps and fwd_eps > 0) else None)
         forward_peg = _peg_ratio(forward_pe, forward_growth)

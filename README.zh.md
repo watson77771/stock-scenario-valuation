@@ -19,10 +19,10 @@
 
 | 方法 | 指令 | 看的是 | 適用 | 階段 |
 |---|---|---|---|---|
-| **P/E 本益比法** | （預設） | 市場願意給幾倍（靠別人的情緒） | 全部 | 階段一 ✅ |
+| **三法交叉比較** | **（預設）** | 並排三法，差距即「基本面 vs 成長溢價 vs 市場情緒」訊號 | — | 階段二 ✅ |
+| **P/E 本益比法** | `--method pe` | 市場願意給幾倍（靠別人的情緒） | 全部 | 階段一 ✅ |
 | **DCF 現金流折現法** | `--method dcf` | 公司一輩子生多少現金折回今天（靠公司本身） | 偏金牛/穩定股 | 階段二 ✅ |
-| **PEG 成長校正法** | `--method peg` | 市場為「成長」付的溢價合不合理 | 僅正成長獲利股 | 階段二+ ✅ |
-| **三法交叉比較** | `--method both` | 並排三法，差距即「基本面 vs 成長溢價 vs 市場情緒」訊號 | — | 階段二+ ✅ |
+| **PEG 成長校正法** | `--method peg` | 市場為「成長」付的溢價合不合理 | 僅正成長獲利股 | 階段二 ✅ |
 
 **三法各有適用區，這是刻意的分工**：DCF 是保守的基本面下限（金牛股 ≈ 市價、成長股 < 市價）；PEG 補上 DCF 看不到的成長溢價（成長股的主力）；P/E 法兩邊都接。對同一檔股票，三法差異本身就是訊號。
 
@@ -30,7 +30,11 @@
 
 **DCF 法則從公司本身的自由現金流出發**，補上 P/E 法看不到的基本面視角。兩種方法結果差異大時，往往是市場定價與基本面出現分歧的訊號。⚠️ DCF 對「基準 FCF」極度敏感，且 yfinance 免費財報常含一次性項目，工具會自動警示，但仍建議手動檢視財報後再下判斷。
 
-**PEG 成長校正法**用「成長率」去解釋本益比合不合理，補上 DCF 對成長股系統性偏低的盲點。它需要可靠的多年 EPS：歷史用 **SEC EDGAR**（官方免費），未來用 **FMP 分析師預估**（需自備免費 API key，設環境變數 `FMP_API_KEY`；沒 key 時自動只算歷史 trailing PEG）。⚠️ PEG 只對正成長、獲利穩定的成長股有意義，對零/負成長、景氣循環、金融、虧損股工具會自動 gating 標警示。
+**PEG 成長校正法**用「成長率」去解釋本益比合不合理，補上 DCF 對成長股系統性偏低的盲點。它需要可靠的多年 EPS：歷史（trailing）用 **SEC EDGAR**（官方免費、不需 key），未來（forward）用 **FMP 分析師預估**。
+
+> 📌 **要用 forward PEG，需先到 [financialmodelingprep.com](https://site.financialmodelingprep.com/) 免費註冊**（只要 email，免信用卡），登入後儀表板會直接給你 API key，設成環境變數 `FMP_API_KEY` 即可。**沒設 key 時 forward PEG 會自動略過，但 trailing PEG 仍正常運作** —— 不是完全沒有 PEG。
+
+⚠️ PEG 只對正成長、獲利穩定的成長股有意義，對零/負成長、景氣循環、金融、虧損股工具會自動 gating 標警示。
 
 📍 **未來規劃（階段三）**：接入 LLM（Claude API），讓使用者可根據個別公司的即時狀況動態生成更精準的假設。詳見下方[路線圖](#路線圖)。
 
@@ -86,20 +90,16 @@ pip install -r requirements.txt
 ## 使用方式
 
 ```bash
-# 估值單一公司 (終端輸出,預設 P/E 法)
-python -m valuate AVGO
+# 預設:三法 (P/E + DCF + PEG) 並排交叉比較 —— 一個指令看完
+python -m valuate AAPL
 
-# 用 DCF 現金流折現法估值 (階段二)
-python -m valuate AAPL --method dcf
-
-# 用 PEG 成長校正法 (EDGAR 歷史 + FMP 預估)
-python -m valuate AAPL --method peg
-
-# 三種方法並排交叉比較
-python -m valuate AAPL --method both
+# 只看單一方法的「完整明細」(進階,需要細節時才用)
+python -m valuate AAPL --method pe      # 只 P/E
+python -m valuate AAPL --method dcf     # 只 DCF (含 WACC 拆解 + 敏感度表)
+python -m valuate AAPL --method peg     # 只 PEG (trailing + forward 明細)
 
 # 同時產出 Excel 報告
-python -m valuate AVGO --excel
+python -m valuate AAPL --excel
 python -m valuate AAPL --method dcf --excel
 
 # 一次估值多家公司
@@ -237,8 +237,8 @@ python -m valuate AAPL --method peg --excel
 | 階段 | 狀態 | 內容 |
 |---|---|---|
 | **階段一** | ✅ 完成 | 產業分類表 P/E 估值 / CLI / Excel 輸出 |
-| **階段二** | 🚧 進行中 | **FCF 現金流折現法 ✅** / **PEG 成長校正法 ✅** / SOTP 業務分拆法 🔜 / 批次 portfolio 🔜 |
-| **階段三** | 🔮 研究中 | LLM 動態假設生成（Claude API）|
+| **階段二** | ✅ 完成 | FCF 現金流折現法 / PEG 成長校正法（三法交叉驗證 + 雙語文件） |
+| **階段三** | 🔮 研究中 | SOTP 業務分拆法 / 批次 portfolio 估值 / LLM 動態假設生成（Claude API） |
 
 ### 關於階段三（LLM 假設生成）
 

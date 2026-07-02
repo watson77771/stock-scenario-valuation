@@ -17,10 +17,10 @@ The tool ships **three complementary valuation methods** that cross-check each o
 
 | Method | Command | What it sees | Best for | Stage |
 |---|---|---|---|---|
-| **P/E multiple** | (default) | what multiple the market will pay (others' sentiment) | all | Stage 1 ✅ |
+| **Three-way cross-check** | **(default)** | all three side by side; the spread is the signal | — | Stage 2 ✅ |
+| **P/E multiple** | `--method pe` | what multiple the market will pay (others' sentiment) | all | Stage 1 ✅ |
 | **DCF (discounted cash flow)** | `--method dcf` | how much cash the company itself generates, discounted to today | cash cows / stable names | Stage 2 ✅ |
-| **PEG (growth-adjusted)** | `--method peg` | whether the premium paid for "growth" is reasonable | profitable, positive-growth only | Stage 2+ ✅ |
-| **Three-way cross-check** | `--method both` | all three side by side; the spread is the signal | — | Stage 2+ ✅ |
+| **PEG (growth-adjusted)** | `--method peg` | whether the premium paid for "growth" is reasonable | profitable, positive-growth only | Stage 2 ✅ |
 
 **Each method has its own zone — that division of labor is deliberate.** DCF is a conservative fundamentals floor (cash cows ≈ price, growth names < price); PEG captures the growth premium DCF can't see (mainly for growth names); P/E catches both sides. For a given stock, the spread between the three is itself a signal.
 
@@ -28,7 +28,11 @@ The tool ships **three complementary valuation methods** that cross-check each o
 
 **DCF starts from the company's own free cash flow**, adding the fundamentals view the P/E method can't see. When the two methods diverge a lot, that's often a sign the market price and fundamentals disagree. ⚠️ DCF is extremely sensitive to "base FCF", and yfinance's free financials often contain one-off items; the tool warns automatically, but manual review of the statements is still advised.
 
-**The PEG method** uses the growth rate to judge whether a P/E is reasonable, covering DCF's blind spot of systematically undervaluing growth names. It needs reliable multi-year EPS: history from **SEC EDGAR** (official, free), the future from **FMP analyst estimates** (bring your own free API key via env var `FMP_API_KEY`; without a key it computes trailing PEG only). ⚠️ PEG is only meaningful for profitable, positive-growth names; for zero/negative-growth, cyclical, financial and loss-making stocks the tool automatically gates and flags it.
+**The PEG method** uses the growth rate to judge whether a P/E is reasonable, covering DCF's blind spot of systematically undervaluing growth names. It needs reliable multi-year EPS: history (trailing) from **SEC EDGAR** (official, free, no key), the future (forward) from **FMP analyst estimates**.
+
+> 📌 **To use forward PEG, first register free at [financialmodelingprep.com](https://site.financialmodelingprep.com/)** (email only, no credit card); the dashboard hands you an API key — set it as the env var `FMP_API_KEY`. **Without a key, forward PEG is skipped but trailing PEG still works** — you don't lose PEG entirely.
+
+⚠️ PEG is only meaningful for profitable, positive-growth names; for zero/negative-growth, cyclical, financial and loss-making stocks the tool automatically gates and flags it.
 
 📍 **Roadmap (stage 3)**: integrate an LLM (Claude API) so users can generate sharper, company-specific assumptions from each company's live situation. See the [roadmap](#roadmap) below.
 
@@ -84,20 +88,16 @@ Requires Python 3.10+
 ## Usage
 
 ```bash
-# Value a single company (terminal output, default P/E method)
-python -m valuate AVGO
+# Default: P/E + DCF + PEG side-by-side cross-check -- one command does it all
+python -m valuate AAPL
 
-# DCF (discounted cash flow) method (stage 2)
-python -m valuate AAPL --method dcf
-
-# PEG growth-adjusted method (EDGAR history + FMP estimates)
-python -m valuate AAPL --method peg
-
-# All three methods side by side
-python -m valuate AAPL --method both
+# Single-method detailed view (advanced, when you want the breakdown)
+python -m valuate AAPL --method pe      # P/E only
+python -m valuate AAPL --method dcf     # DCF only (with WACC + sensitivity table)
+python -m valuate AAPL --method peg     # PEG only (trailing + forward breakdown)
 
 # Also write an Excel report
-python -m valuate AVGO --excel
+python -m valuate AAPL --excel
 python -m valuate AAPL --method dcf --excel
 
 # Value several companies at once
@@ -240,8 +240,8 @@ python -m valuate AAPL --method peg --excel
 | Stage | Status | Content |
 |---|---|---|
 | **Stage 1** | ✅ done | sector-table P/E valuation / CLI / Excel output |
-| **Stage 2** | 🚧 in progress | **FCF DCF ✅** / **PEG growth-adjusted ✅** / SOTP sum-of-the-parts 🔜 / batch portfolio 🔜 |
-| **Stage 3** | 🔮 research | LLM-generated dynamic assumptions (Claude API) |
+| **Stage 2** | ✅ done | FCF DCF / PEG growth-adjusted (three-way cross-check + bilingual docs) |
+| **Stage 3** | 🔮 research | SOTP sum-of-the-parts / batch portfolio / LLM-generated dynamic assumptions (Claude API) |
 
 ### About stage 3 (LLM assumption generation)
 

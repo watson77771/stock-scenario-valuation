@@ -4,14 +4,12 @@ cli.py
 Command-line entry point.
 
 Usage:
-  python -m valuate AVGO                  # P/E method (sector-table assumptions)
-  python -m valuate AVGO --excel          # also write xlsx
+  python -m valuate AAPL                  # default: P/E + DCF + PEG side-by-side cross-check
   python -m valuate NVDA TSLA AAPL        # multiple companies
-  python -m valuate AAPL --method dcf     # DCF (discounted cash flow)
-  python -m valuate AAPL --method dcf --excel
-  python -m valuate AAPL --method peg     # growth-adjusted (EDGAR history + FMP estimates)
-  python -m valuate AAPL --method both    # P/E, DCF, PEG side-by-side cross-check
-  python -m valuate AVGO --use-llm        # Claude API assumptions (stage 3, needs API key)
+  python -m valuate AAPL --excel          # also write xlsx report(s)
+  python -m valuate AAPL --method pe      # P/E only (detailed single view)
+  python -m valuate AAPL --method dcf     # DCF only (with WACC + sensitivity table)
+  python -m valuate AAPL --method peg     # PEG only (trailing + forward breakdown)
   python -m valuate --list-sectors        # list supported sectors
 """
 
@@ -149,10 +147,10 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument("tickers", nargs="*", help="ticker symbols (one or more)")
-    parser.add_argument("--method", choices=["pe", "dcf", "peg", "both"], default="pe",
-                        help="valuation method: pe=P/E (default) / dcf=discounted cash flow / "
-                             "peg=growth-adjusted (EDGAR history + FMP estimates) / "
-                             "both=all three side-by-side")
+    parser.add_argument("--method", choices=["pe", "dcf", "peg", "both"], default="both",
+                        help="valuation method: both=P/E + DCF + PEG cross-check (default) / "
+                             "pe=P/E only / dcf=DCF only (WACC + sensitivity) / "
+                             "peg=PEG only (trailing + forward)")
     parser.add_argument("--excel", action="store_true", help="write an xlsx report")
     parser.add_argument("--use-llm", action="store_true",
                         help="use Claude API for assumptions (stage 3, needs ANTHROPIC_API_KEY; P/E only)")
